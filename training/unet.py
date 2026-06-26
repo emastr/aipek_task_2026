@@ -108,7 +108,7 @@ if __name__ == "__main__":
                             plt.imshow(im.imread(f"{save_path}{target}{i}.png"))
                             plt.axis('off')
                     plt.tight_layout()
-                    plt.savefig(f"{save_path}examples_{epoch}.png")
+                    plt.savefig(f"{save_path}examples.png")
                     plt.close('all')
 
                 torch.save(net.state_dict(), f"{save_path}epoch_{epoch}.pt")
