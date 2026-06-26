@@ -112,6 +112,7 @@ def create_data_loader(
     volume_transforms = Compose([
         LoadImaged(keys=["input", "output"]),
         EnsureChannelFirstd(keys=["input", "output"]),
+        ExtractSpacingd(keys=["input"], init_sizes=512, out_sizes=size),
         Transposed(keys=["input", "output"], indices=[0, 3, 1, 2]),
         Lambdad(keys=["input", "output"], func=_make_contiguous),
         CenterSpatialCropd(keys=["input", "output"], roi_size=(-1, 512, 512)),
@@ -120,7 +121,6 @@ def create_data_loader(
             spatial_size=(-1, size, size),
             mode=("trilinear", "nearest"),
         ),
-        ExtractSpacingd(keys=["input"], init_sizes=512, out_sizes=size),
     ])
     
     # Create persistent part    

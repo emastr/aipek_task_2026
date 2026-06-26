@@ -1,3 +1,6 @@
+from matplotlib import image as im
+
+
 if __name__ == "__main__":
     import sys
     sys.path.append('')
@@ -14,8 +17,9 @@ if __name__ == "__main__":
     epochs = 700
     size = 128
     channels = 8 # Number of slices per chunk
-    batch_size = 12 # Number of chunks per GPU batch
+    batch_size = 7 # Number of chunks per GPU batch
     num_slices = 20
+    save_path = "training/unet/"
     train_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
         label_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_OUT}",
@@ -69,7 +73,7 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
             
-            if epoch % 3 == 0 and b == 0:
+            if epoch % 5 == 0 and b == 0:
                 
                 with torch.no_grad():
                     iter_val = iter(valid_loader)
@@ -88,16 +92,26 @@ if __name__ == "__main__":
                         kwargs = {"vmin": -1, "vmax": 1, "cmap": "gray"}
                         plot_slices(ynet_val.squeeze(), pixdim, slices, (1,1,1), **kwargs)
                         plt.gca().set_title(title)
-                        plt.gcf().savefig(f"training/unet/pred{i}.png")
+                        plt.gcf().savefig(f"{save_path}pred{i}.png")
                         plot_slices(y_val.cpu().squeeze(), pixdim, slices, thicknes, **kwargs)
                         plt.gca().set_title(title)
-                        plt.gcf().savefig(f"training/unet/out{i}.png")
+                        plt.gcf().savefig(f"{save_path}out{i}.png")
                         plot_slices(x_val[:, :channels].cpu().squeeze(), pixdim, slices, thicknes, **kwargs)
                         plt.gca().set_title(title)
-                        plt.gcf().savefig(f"training/unet/inp{i}.png")
+                        plt.gcf().savefig(f"{save_path}inp{i}.png")
                         plt.close('all')
-                
-                torch.save(net.state_dict(), f"training/unet/epoch_{epoch}.pt")
+                        
+                    plt.figure(figsize=(15, 10))
+                    for i in range(3):
+                        for j, target in enumerate(["pred", "out", "inp"]):
+                            plt.subplot(3, 3, i*3 + j + 1)
+                            plt.imshow(im.imread(f"{save_path}{target}{i}.png"))
+                            plt.axis('off')
+                    plt.tight_layout()
+                    plt.savefig(f"{save_path}examples_{epoch}.png")
+                    plt.close('all')
+
+                torch.save(net.state_dict(), f"{save_path}epoch_{epoch}.pt")
                 
             
             current_lr = optimizer.param_groups[0]["lr"]

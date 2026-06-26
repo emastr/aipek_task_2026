@@ -17,7 +17,7 @@ if __name__ == "__main__":
     epochs = 700
     size = 128
     channels = 8 # Number of slices per chunk
-    batch_size = 12 # Number of chunks per GPU batch
+    batch_size = 5 # Number of chunks per GPU batch
     num_slices = 20
     train_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",

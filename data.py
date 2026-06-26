@@ -15,8 +15,6 @@ class CONSTANTS:
     NORM_DATA_PATH_TRAIN_INP = "nnUNet_raw/Dataset_val/imagesTr/"
     NORM_DATA_PATH_TRAIN_OUT = "nnUNet_raw/Dataset_val/labelsTr/"
     
-    
-    
 
 class NiiPoint():
     @ staticmethod
@@ -112,16 +110,15 @@ def plot_slices(data_torch, pixdims, slices, thicknesses=None, axes=None, **kwar
     
     pos_slices = [idx[i] * pixdims[i] for i in range(3)]
     slice_widths = [pixdims[i] * data_np.shape[i] for i in range(3)]
-    
+    plot_widths = [slice_widths[i] for i in [2, 2, 1]]
     
     
     if axes is None:
         #axes = [
         #    plt.subplot(1, 3, i+1) for i in range(3)
         #]
-        inv_wd = [1/w for w in slice_widths]
-        sum_inv_wd = sum(inv_wd)
-        ratios = [iw / sum_inv_wd for iw in inv_wd]
+        sum_wd = sum(plot_widths)
+        ratios = [iw / sum_wd for iw in plot_widths]
         max_ratio = max(ratios)
         
         plt.figure(figsize=(10, 10*max_ratio))
