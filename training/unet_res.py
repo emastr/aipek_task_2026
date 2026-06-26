@@ -2,13 +2,16 @@ if __name__ == "__main__":
     import sys
     sys.path.append('')
     sys.path.append('../')
+    
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     import torch
     torch.manual_seed(0)
 
     import matplotlib.pyplot as plt
     from data import CONSTANTS
-    from monai.networks.nets import BasicUNet
+    from monai.networks.nets import UNet
     from data_monai import create_data_loader, plot_slices
     
     epochs = 700
@@ -33,11 +36,13 @@ if __name__ == "__main__":
         device = "cuda"
     )
 
-    net = BasicUNet(
+    net = UNet(
         spatial_dims=2,
-        in_channels= channels * 2,      # X and positional encoding
-        out_channels= channels,             # Y0 - Y1
-        features=(64, 64, 128, 256, 512, 64),#(32, 32, 64, 128, 256, 32),
+        in_channels=channels * 2,
+        out_channels=channels,
+        channels=(64, 64, 128, 256, 512),
+        strides=(2, 2, 2, 2),
+        num_res_units=2,
     ).to("cuda", dtype=torch.float32)
     
     
@@ -88,16 +93,16 @@ if __name__ == "__main__":
                         kwargs = {"vmin": -1, "vmax": 1, "cmap": "gray"}
                         plot_slices(ynet_val.squeeze(), pixdim, slices, (1,1,1), **kwargs)
                         plt.gca().set_title(title)
-                        plt.gcf().savefig(f"training/unet/pred{i}.png")
+                        plt.gcf().savefig(f"training/unet_res/pred{i}.png")
                         plot_slices(y_val.cpu().squeeze(), pixdim, slices, thicknes, **kwargs)
                         plt.gca().set_title(title)
-                        plt.gcf().savefig(f"training/unet/out{i}.png")
+                        plt.gcf().savefig(f"training/unet_res/out{i}.png")
                         plot_slices(x_val[:, :channels].cpu().squeeze(), pixdim, slices, thicknes, **kwargs)
                         plt.gca().set_title(title)
-                        plt.gcf().savefig(f"training/unet/inp{i}.png")
+                        plt.gcf().savefig(f"training/unet_res/inp{i}.png")
                         plt.close('all')
                 
-                torch.save(net.state_dict(), f"training/unet/epoch_{epoch}.pt")
+                torch.save(net.state_dict(), f"training/unet_res/epoch_{epoch}.pt")
                 
             
             current_lr = optimizer.param_groups[0]["lr"]
