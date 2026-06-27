@@ -17,7 +17,7 @@ if __name__ == "__main__":
     channels = 8 # Number of slices per chunk
     batch_size = 12 # Number of chunks per GPU batch
     num_slices = 20
-    save_path = "training/unet_res/"
+    save_path = "training/unet_res_weighted_2/"
     train_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
         label_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_OUT}",
@@ -35,7 +35,7 @@ if __name__ == "__main__":
         device = "cuda"
     )
 
-    net = UNet(
+    unet = UNet(
         spatial_dims=2,
         in_channels=channels * 2,
         out_channels=channels,
@@ -44,6 +44,15 @@ if __name__ == "__main__":
         num_res_units=2,
     ).to("cuda", dtype=torch.float32)
     
+    class ClampNet(torch.nn.Module):
+        def __init__(self, net):
+            super().__init__()
+            self.net = net
+            
+        def forward(self, x):
+            return torch.tanh(self.net(x)) # clamp to [-1, 1]
+    
+    net = unet# ClampNet(unet).to("cuda", dtype=torch.float32)
     
     optimizer = torch.optim.Adam(params=net.parameters(), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -53,11 +62,23 @@ if __name__ == "__main__":
     )
 
 
-    def loss_fn(ynet, y):
-        return torch.mean((ynet -  y)**2)
-
-
+    def weighted_l2(ynet, y):
+        y_01 = (y + 1)/2
+        ynet_01 = (ynet + 1)/2
+        false_pos_weight = 100.0
+        false_neg_weight = 1.0
+        both = (y_01 + torch.clamp(ynet_01, 0, 1)) / 2
+        loss_weight = (both * false_pos_weight + (1-both) * false_neg_weight)/(false_pos_weight + false_neg_weight)
+        return torch.mean(loss_weight * (ynet -  y)**2)
+    
+    def expectile_l2(ynet, y):
+        diff = (ynet - y)/2
+        false_pos_weight = 100.0
+        false_neg_weight = 1.0
+        expectile_weight = ((diff > 0) * false_pos_weight + (diff <= 0) * false_neg_weight)/(false_pos_weight + false_neg_weight)
+        return torch.mean(expectile_weight * (ynet -  y)**2)
   
+    loss_fn = weighted_l2  # or expectile_l2, depending on your preference
         
     for epoch in range(epochs):
         for b, batch in enumerate(train_loader):
@@ -111,8 +132,8 @@ if __name__ == "__main__":
                     plt.tight_layout()
                     plt.savefig(f"{save_path}examples.png")
                     plt.close('all')
-
-                torch.save(net.state_dict(), f"{save_path}epoch_{epoch}.pt")
+                if epoch % 50 == 0:
+                    torch.save(net.state_dict(), f"{save_path}epoch_{epoch}.pt")
                 
             
             current_lr = optimizer.param_groups[0]["lr"]
