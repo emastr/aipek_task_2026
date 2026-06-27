@@ -9,7 +9,8 @@ from monai.transforms import (
     Transposed,
     MapTransform,
     RandSpatialCropSamplesd,
-    Resized
+    Resized,
+    SpatialCropd,
 )
 import os
 import shutil
@@ -65,7 +66,7 @@ class RandomSliceDataset(torch.utils.data.Dataset):
     def __init__(self, base_dataset, channels, size, num_slices=1):
         self.base_dataset = base_dataset
         self.patch_transform = Compose([
-            VerticalPositionEmbedding(keys=["input"]),
+            VerticalPositionEmbedding(keys=["input"]),  # Add vertical position embedding to the input data
             RandSpatialCropSamplesd(
                 keys=["input", "output"],
                 roi_size=(channels, size, size), 
@@ -116,6 +117,9 @@ def create_data_loader(
         Transposed(keys=["input", "output"], indices=[0, 3, 1, 2]),
         Lambdad(keys=["input", "output"], func=_make_contiguous),
         CenterSpatialCropd(keys=["input", "output"], roi_size=(-1, 512, 512)),
+        #SpatialCropd(keys=["input", "output"],      # Slice off the first 30 slices to avoid artifacts at the top of the volume
+        #             roi_start=(10, 0, 0),          # Slice off the last 10 slices 
+        #             roi_end=(-10, 512, 512)),
         Resized(
             keys=["input", "output"],
             spatial_size=(-1, size, size),
