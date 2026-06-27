@@ -5,3 +5,4 @@ nnUNet_raw/
 .monai_cache/
 *.pt
 *.png
+container_topcow_nic

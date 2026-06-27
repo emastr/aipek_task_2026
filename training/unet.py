@@ -14,7 +14,8 @@ if __name__ == "__main__":
     from monai.networks.nets import BasicUNet
     from data_monai import create_data_loader, plot_slices
     
-    epochs = 700
+    epochs = 2_000
+    epoch_start = 695
     size = 128
     channels = 8 # Number of slices per chunk
     batch_size = 7 # Number of chunks per GPU batch
@@ -44,12 +45,14 @@ if __name__ == "__main__":
         features=(64, 64, 128, 256, 512, 64),#(32, 32, 64, 128, 256, 32),
     ).to("cuda", dtype=torch.float32)
     
+    if epoch_start is not None:
+        net.load_state_dict(torch.load(f"{save_path}epoch_{epoch_start}.pt", map_location="cuda"))
     
     optimizer = torch.optim.Adam(params=net.parameters(), lr=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=epochs,
-        eta_min=1e-6,
+        eta_min=1e-7,
     )
 
 
@@ -57,8 +60,9 @@ if __name__ == "__main__":
         return torch.mean((ynet -  y)**2)
 
 
+    epch_range = range(epoch_start, epochs) if epoch_start is not None else range(epochs)
         
-    for epoch in range(epochs):
+    for epoch in epch_range:
         for b, batch in enumerate(train_loader):
             
             optimizer.zero_grad()
