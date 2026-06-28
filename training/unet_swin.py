@@ -9,7 +9,7 @@ if __name__ == "__main__":
     import matplotlib.image as im
     import matplotlib.pyplot as plt
     from data import CONSTANTS
-    from monai.networks.nets import UNet
+    from monai.networks.nets import SwinUNETR
     from data_monai import create_data_loader, plot_slices
     
     epochs = 3000
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     channels = 16 # Number of slices per chunk
     batch_size = 12 # Number of chunks per GPU batch
     num_slices = 20
-    save_path = "training/unet_res_weighted/"
+    save_path = "training/unet_swin/"
     train_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
         label_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_OUT}",
@@ -35,14 +35,25 @@ if __name__ == "__main__":
         device = "cuda"
     )
 
-    unet = UNet(
-        spatial_dims=2,
-        in_channels=channels * 2,
-        out_channels=channels,
-        channels=(64, 64, 128, 256, 512),
-        strides=(2, 2, 2, 2),
-        num_res_units=2,
+    net = SwinUNETR(
+        img_size = (size, size), 
+        in_channels = 2 * channels, 
+        out_channels = channels, 
+        depths=(2, 2, 2, 2), 
+        num_heads=(3, 6, 12, 24), 
+        feature_size=24, 
+        norm_name='instance', 
+        drop_rate=0.0, 
+        attn_drop_rate=0.0, 
+        dropout_path_rate=0.0, 
+        normalize=True, 
+        use_checkpoint=False, 
+        spatial_dims=2, 
+        downsample='merging', 
+        use_v2=False
     ).to("cuda", dtype=torch.float32)
+
+    
     
     class ClampNet(torch.nn.Module):
         def __init__(self, net):
