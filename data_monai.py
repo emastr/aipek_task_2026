@@ -4,6 +4,7 @@ from monai.transforms import (
     Compose,
     LoadImaged,
     EnsureChannelFirstd,
+    EnsureTyped,
     CenterSpatialCropd,
     Lambdad,
     Transposed,
@@ -11,6 +12,8 @@ from monai.transforms import (
     RandSpatialCropSamplesd,
     Resized,
     SpatialCropd,
+    RandFlipd,
+    RandAffined
 )
 import os
 import shutil
@@ -63,16 +66,37 @@ class VerticalPositionEmbedding(MapTransform):
         return d
     
 class RandomSliceDataset(torch.utils.data.Dataset):
-    def __init__(self, base_dataset, channels, size, num_slices=1):
+    def __init__(self, 
+                 base_dataset, 
+                 channels, 
+                 size, 
+                 num_slices=1,
+                random_flip=False,
+                random_shift=False):
+        self.random_flip = random_flip
+        self.random_shift = random_shift
         self.base_dataset = base_dataset
+        self.channels = channels
         self.patch_transform = Compose([
             VerticalPositionEmbedding(keys=["input"]),  # Add vertical position embedding to the input data
             RandSpatialCropSamplesd(
                 keys=["input", "output"],
                 roi_size=(channels, size, size), 
                 num_samples=num_slices,         
-                random_size=False
+                random_size=False,
+            ),
+            RandFlipd(
+                keys=["input", "output"],
+                prob=0.5 if self.random_flip else 0.0,
+                spatial_axis=1
+            ),
+            RandAffined(
+                keys=["input", "output"],
+                prob=0.5 if self.random_shift else 0.0,
+                translate_range=(0, 10, 10),
+                padding_mode="border"
             )
+            
     ])
 
     def __len__(self):
@@ -80,9 +104,74 @@ class RandomSliceDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         volume = self.base_dataset[idx]
-        return self.patch_transform(volume)
+        samples = self.patch_transform(volume)
+        if not isinstance(samples, list):
+            samples = [samples]
 
+        fixed_samples = []
+        for sample in samples:
+            sample = dict(sample)
+            depth = sample["input"].shape[1]
+            if depth < self.channels:
+                pad = self.channels - depth
+                sample["input"] = torch.nn.functional.pad(
+                    sample["input"], (0, 0, 0, 0, 0, pad), value=-1.
+                ).contiguous()
+                sample["output"] = torch.nn.functional.pad(
+                    sample["output"], (0, 0, 0, 0, 0, pad), value=-1.
+                ).contiguous()
+            fixed_samples.append(sample)
 
+        return fixed_samples
+
+class NeighborLoader:
+    
+    def __init__(
+        self,
+        image_dir: str,
+        label_dir: str,
+        channels: int, # Number of slices per chunk
+        neighbors: int = 2, # Number of neighboring slices to include on each side
+        num_slices: int = 1, # Number of slices per chunk
+        device: str = "cuda",
+        size: int = 128,
+        coarse_size: int = 32
+    ):
+        self.image_dir = image_dir
+        self.label_dir = label_dir
+        self.channels = channels
+        self.neighbors = neighbors
+        self.num_slices = num_slices
+        self.device = device
+        self.size = size
+        
+        data_loader = create_data_loader(
+            image_dir=image_dir,
+            label_dir=label_dir,
+            channels=channels,
+            batch_size=1,
+            device=device,
+            num_slices=num_slices,
+            size=size,
+            coarse_size=coarse_size
+        )
+        
+    
+    def get_neighbors(self, x, ignore_idx=None):
+        """
+        Get neighboring slices for a given batch of slices.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width).
+            ignore_idx (list): List of indices to ignore when selecting neighbors.
+    
+        Returns:
+            torch.Tensor: Tensor containing neighboring slices of shape (batch_size, channels, height, width).
+        """
+        pass
+        
+        
+    
 def create_data_loader(
     image_dir,
     label_dir,
@@ -91,7 +180,9 @@ def create_data_loader(
     device,
     num_slices=1,
     size=128,
-    clear_cache=True
+    clear_cache=True,
+    random_flip=False,
+    random_shift=False
 ):
     # Use a transform-specific cache folder to avoid stale data reuse.
     cache_dir = ".monai_cache"
@@ -120,6 +211,7 @@ def create_data_loader(
         #SpatialCropd(keys=["input", "output"],      # Slice off the first 30 slices to avoid artifacts at the top of the volume
         #             roi_start=(10, 0, 0),          # Slice off the last 10 slices 
         #             roi_end=(-10, 512, 512)),
+        EnsureTyped(keys=["input", "output"], track_meta=False),
         Resized(
             keys=["input", "output"],
             spatial_size=(-1, size, size),
@@ -140,7 +232,9 @@ def create_data_loader(
         base_dataset=persistent_ds,
         channels=channels,
         size = size,
-        num_slices = num_slices
+        num_slices = num_slices,
+        random_flip=random_flip,
+        random_shift=random_shift
     )
 
     train_loader = DataLoader(
