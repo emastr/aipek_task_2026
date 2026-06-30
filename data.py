@@ -2,6 +2,7 @@ import torch
 import nibabel as nib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import numpy as np
 
 class CONSTANTS:
     BACK = 0    # Background
@@ -9,6 +10,7 @@ class CONSTANTS:
     VESSEL_MAX = 400  # HU vessel max value for normalization
     NCCT_MIN = -30  # HU NCCT min value for normalization
     NCCT_MAX = 90   # HU NCCT max value for normalization
+    DATA_PATH = "nnUNet_raw/Dataset/"
     NORM_DATA_PATH = "nnUNet_raw/Dataset_val/"
     NORM_DATA_PATH_VAL_INP = "nnUNet_raw/Dataset_val/imagesVl/"
     NORM_DATA_PATH_VAL_OUT = "nnUNet_raw/Dataset_val/labelsVl/"
@@ -18,8 +20,13 @@ class CONSTANTS:
 
 class NiiPoint():
     @ staticmethod
-    def from_path(path, device, dtype=torch.float32, tfm=None):
+    def from_path(path, device, dtype=torch.float32, tfm=None, ensure_lps=False):
         nii = nib.load(path)
+        if ensure_lps:
+            src_ornt = nib.orientations.io_orientation(nii.affine)
+            lps_ornt = nib.orientations.axcodes2ornt(("L", "P", "S"))
+            to_lps = nib.orientations.ornt_transform(src_ornt, lps_ornt)
+            nii = nii.as_reoriented(to_lps)
         data_np = nii.get_fdata()
         data = torch.from_numpy(data_np).to(device, dtype=dtype)
         return NiiPoint(data, nii.affine, nii.header, device, dtype, tfm)
@@ -103,9 +110,9 @@ def plot_slices(data_torch, pixdims, slices, thicknesses=None, axes=None, **kwar
         
     else:
         slice_data = [
-            data_np[idx[0]-thicknesses[0]:idx[0]+thicknesses[0], :, :].max(axis=0),
-            data_np[:, idx[1]-thicknesses[1]:idx[1]+thicknesses[1], :].max(axis=1),
-            data_np[:, :, idx[2]-thicknesses[2]:idx[2]+thicknesses[2]].max(axis=2)
+            np.nanmax(data_np[idx[0]-thicknesses[0]:idx[0]+thicknesses[0], :, :], axis=0),
+            np.nanmax(data_np[:, idx[1]-thicknesses[1]:idx[1]+thicknesses[1], :], axis=1),
+            np.nanmax(data_np[:, :, idx[2]-thicknesses[2]:idx[2]+thicknesses[2]], axis=2)
         ]
     
     pos_slices = [idx[i] * pixdims[i] for i in range(3)]
@@ -127,8 +134,8 @@ def plot_slices(data_torch, pixdims, slices, thicknesses=None, axes=None, **kwar
     for i in range(3):
         j2, j1 = [j for j in range(3) if j != i]
         axes[i].imshow(slice_data[i], extent=[0, slice_widths[j1], 0, slice_widths[j2]], **kwargs)
-        axes[i].plot([pos_slices[j1], pos_slices[j1]], [0, slice_widths[j2]], 'steelblue', linewidth=1)
-        axes[i].plot([0, slice_widths[j1]], [slice_widths[j2]-pos_slices[j2], slice_widths[j2]-pos_slices[j2]], 'steelblue', linewidth=1)
+        axes[i].plot([pos_slices[j1], pos_slices[j1]], [0, slice_widths[j2]], 'red', linewidth=1)
+        axes[i].plot([0, slice_widths[j1]], [slice_widths[j2]-pos_slices[j2], slice_widths[j2]-pos_slices[j2]], 'red', linewidth=1)
         axes[i].set_title(f'{["X", "Y", "Z"][i]} Slice')
         axes[i].set_aspect("equal")
         axes[i].axis('off')

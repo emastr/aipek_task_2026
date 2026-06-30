@@ -14,7 +14,7 @@ if __name__ == "__main__":
     
     epochs = 3000
     size = 128
-    channels = 16 # Number of slices per chunk
+    channels = 10 # Number of slices per chunk
     batch_size = 12 # Number of chunks per GPU batch
     num_slices = 20
     save_path = "training/unet_res_weighted/"
