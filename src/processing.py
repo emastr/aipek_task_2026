@@ -9,14 +9,17 @@ class CONSTANTS:
     VESSEL_MAX = 400  # HU vessel max value for normalization
     NCCT_MIN = -30  # HU NCCT min value for normalization
     NCCT_MAX = 90   # HU NCCT max value for normalization
-    DATA_PATH = "nnUNet_raw/Dataset/"
-    NORM_DATA_PATH = "nnUNet_raw/Dataset_val/"
-    NORM_DATA_PATH_VAL_INP = "nnUNet_raw/Dataset_val/imagesVl/"
-    NORM_DATA_PATH_VAL_OUT = "nnUNet_raw/Dataset_val/labelsVl/"
-    NORM_DATA_PATH_TRAIN_INP = "nnUNet_raw/Dataset_val/imagesTr/"
-    NORM_DATA_PATH_TRAIN_OUT = "nnUNet_raw/Dataset_val/labelsTr/"
-    NORM_PRED_PATH = "nnUNet_raw/Predictions_val/"
-    PRED_PATH = "nnUNet_raw/Predictions_val_small/"
+    DATA_PATH = "data/Dataset/"
+    NORM_DATA_PATH = "data/Dataset_val/"
+    NORM_DATA_PATH_VAL_INP = "data/Dataset_val/imagesVl/"
+    NORM_DATA_PATH_VAL_OUT = "data/Dataset_val/labelsVl/"
+    NORM_DATA_PATH_TRAIN_INP = "data/Dataset_val/imagesTr/"
+    NORM_DATA_PATH_TRAIN_OUT = "data/Dataset_val/labelsTr/"
+    NORM_DATA_PATH_TEST_INP = "data/Dataset_val/imagesTs/"
+    NORM_DATA_PATH_TEST_OUT = "data/Dataset_val/labelsTs/"
+    NORM_PRED_PATH = "data/Predictions_val/"
+    TEST_PRED_PATH = "data/Predictions_test/"
+    PRED_PATH = "data/Predictions_val_small/"
     
 
 class DataTfmLibrary: 
@@ -136,16 +139,19 @@ class BaseTfmLibrary:
         return _tfm
 
 
-def transform_vessel_to_cta(prediction_data_path, ncct_data_path, output_data_path):
+def transform_vessel_to_cta(prediction_data_path, ncct_data_path, output_data_path, to_int=False):
     # Load the predictions and NCCT data
     vessel_normalized = NiiPoint.from_path(prediction_data_path, device="cpu")
+    vessel_normalized.apply_tfm(lambda x, h, a: torch.clamp(x, min=-1.0, max=1.0))
     ncct_data = NiiPoint.from_path(ncct_data_path, device="cpu")
     vessel = DataTfmLibrary.inv_vessel_normalization_tfm(vessel_normalized)
     cta_data = DataTfmLibrary.inv_vessel_tfm(ncct_data, vessel)
+    if to_int:
+        cta_data.data = cta_data.data.to(torch.int16)
     cta_data.save_to_path(output_data_path)
 
 
-def transform_all(root_pred, root_ncct, root_output, id_subset=None):
+def transform_all(root_pred, root_ncct, root_output, id_subset=None, to_int=False):
     import os
     from pathlib import Path
 
@@ -163,4 +169,4 @@ def transform_all(root_pred, root_ncct, root_output, id_subset=None):
             pred_path = root_pred / pred_file
             ncct_path = root_ncct / ncct_file
             output_path = root_output / output_file
-            transform_vessel_to_cta(pred_path, ncct_path, output_path)
+            transform_vessel_to_cta(pred_path, ncct_path, output_path, to_int)

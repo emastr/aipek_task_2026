@@ -8,6 +8,17 @@ from pathlib import Path
 from typing import Any
 
 
+WARNING = (
+    """
+    The plotting functions break depending on versions of torch and monai, and backend for nii loading.
+    They are still useful, but become heavily distorted if the nii loading backend is not set to nibabel. 
+    If you see distorted plots, try setting the environment variable:
+    """
+)
+
+# print warning
+print(WARNING)
+
 def plot_from_path(path, slices, thicknesses=None, axes=None, **kwargs):
     from src.data import NiiPoint
     nii = NiiPoint.from_path(path, device="cpu", dtype=torch.float32, ensure_lps=True)
@@ -87,7 +98,7 @@ def plot_cta_and_segmentation(
     overlay_cmap = plt.get_cmap("Set3").copy()
     overlay_cmap.set_bad(alpha=0.0)
     pred_overlay.plot_slices_nii(slices,
-                                 (data.shape[0]//2, data.shape[1]//2, data.shape[2]//2),
+                                 (data.shape[0]//10, data.shape[1]//10, data.shape[2]//10),
                                  axes=axes,
                                  cmap=overlay_cmap,
                                  alpha=1.0,
@@ -206,6 +217,4 @@ def validation_plots(durag, loader, path, epoch, loss_fn, neighbor_count, num_va
     plt.tight_layout()
     plt.savefig(f"{path}_examples.png")
     plt.close('all')
-
-    print(f"Epoch {epoch} Validation Loss: {loss_val:.4f}")
     return loss_val

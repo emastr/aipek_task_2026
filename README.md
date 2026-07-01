@@ -139,25 +139,27 @@ For the qualitative presentation, I visualize the outputs $y_{net}$ and its CTA 
 The baselines obtain 7% NL1 error on the CTA validation data, but 100% NL1 and only 7% IoU (higher is better) on the vessel data. Most of the NCCT (soft tissue + bone) is accounted for, but almost none of the vessel structure. To fully appreciate how poor the quality is, we can attempt to run CoW segmentation on the outputs.
 | Model | $\mathrm{NL1_{vessel}}$ | $\mathrm{NL1_{CTA}}$ | $\mathrm{IoU_{vessel}}(0.1)$ |
 |---|---|---|---|
-| conv 1-nn | $113.3\% \pm 10.4\%$ | $7.6\% \pm 6.0\%$ | $7.2\% \pm 1.3\%$ |
-| knn | $119.7\% \pm 13.6\%$ | $7.7\% \pm 6.0\%$ | $1.8\% \pm 0.3\%$ |
+| conv 1-NN | $104.7\% \pm 4.8\%$ | $8.2\% \pm 2.5\%$ | $8.7\% \pm 1.1\%$ |
+| 3-NN | $113.8\% \pm 6.0\%$ | $8.2\% \pm 2.5\%$ | $1.9\% \pm 0.1\%$ |
+| DURAG | $172.8\% \pm 16.9\%$ | $8.6\% \pm 2.5\%$ | $11.3\% \pm 1.6\%$ |
 
+As seen in the table, DURAG has almost double the error on the vessel maps compared to baseline, despite being explicitely trained to predict them. The IoU is higher, which means that it is better att predicting the approximate regions where vessels will be. The CTA error is comparable for all models.
 
 ## Qualitative Results
 
 First I compare the predicted vessel structure from the different models on a valudation case 0007. 
 
 #### Vessel structure for CTA (ground truth)
-![img](figures/vessel_0007_cta.png)
+![img](figures/vessel_0012_cta.png)
 
 #### Predicted vessel structure, 3-NN
-![img](figures/vessel_0007_knn.png)
+![img](figures/vessel_0012_knn.png)
 
 #### Predicted vessel structure, convolutional 1-NN
-![img](figures/vessel_0007_cknn.png)
+![img](figures/vessel_0012_cknn.png)
 
 #### Predicted vessel structure, DURAG
-![img](figures/vessel_0007_durag.png)
+![img](figures/vessel_0012_durag.png)
 
 
 Below are segmentation results from running CoW segmentation on the CTA data for case 0007 (in my validation set, not trained on), using the different models. Reproducing these results requires installing the TopCoWSubmissions library, as specified before. The knn algorithm results in vessels at the correct spot but wrong shape, and convolutional 1-NN hallucinates new vessels all over.

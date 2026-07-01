@@ -30,7 +30,17 @@ class NiiKNN(nn.Module):
             dist[i] = torch.mean(diff.data**2)**0.5
             if self.max_num is not None and i >= self.max_num:
                 break
-            
+        
+        x = NiiPoint(
+            torch.zeros_like(x.data, device="cuda"),
+            x.header,
+            x.affine
+        )
+        y = NiiPoint(
+            torch.zeros_like(x.data, device="cuda"),
+            x.header,
+            x.affine
+        )
         sorted_idx = torch.argsort(dist)
         for i in range(self.k):
             idx = sorted_idx[i]
@@ -38,12 +48,9 @@ class NiiKNN(nn.Module):
             label_file = f"{file[:9]}_0001.nii.gz"
             xi = NiiPoint.from_path(os.path.join(self.img_path, file), "cuda")
             yi = NiiPoint.from_path(os.path.join(self.label_path, label_file), "cuda")    
-            if i == 0:
-                x = xi * (1 / self.k)
-                y = yi * (1 / self.k)
-            else:
-                x = x + xi * (1 / self.k)
-                y = y + yi * (1 / self.k)
+            
+            x = x + xi * (1 / self.k)
+            y = y + yi * (1 / self.k)
         return x, y
     
 
