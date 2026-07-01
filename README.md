@@ -1,6 +1,8 @@
 
 # Code install
 
+Note: use the ``final`` branch, ``main`` contains a bunch of old experiments.
+
 This code has some mandatory dependencies - some that are only used for training and some that are used during evaluation. The repo is missing a toml file and cannot be installed, but all the scripts can be run in python module mode:
 ```
 python -m scripts.<file name without .py>
