@@ -1,4 +1,6 @@
 .venv
+.vscode
+.neighbor_cache
 __pycache__/
 data_raw/
 nnUNet_raw/
