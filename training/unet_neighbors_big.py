@@ -1,3 +1,6 @@
+from src.architectures import NeighborLoader
+
+
 if __name__ == "__main__":
     import sys
     sys.path.append('')
@@ -8,9 +11,9 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     import matplotlib.image as im
     import matplotlib.pyplot as plt
-    from data import CONSTANTS
+    from src.processing import CONSTANTS
     from monai.networks.nets import UNet
-    from data_monai import create_data_loader, plot_slices, NeighborLoader
+    from src.data import create_data_loader, plot_slices
     
     epochs = 301
     start_epoch = 0

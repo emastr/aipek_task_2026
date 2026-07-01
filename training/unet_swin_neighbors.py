@@ -8,9 +8,9 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     import matplotlib.image as im
     import matplotlib.pyplot as plt
-    from data import CONSTANTS
+    from src.processing import CONSTANTS
     from monai.networks.nets import SwinUNETR
-    from data_monai import NeighborFeature, create_data_loader, plot_slices
+    from src.data import NeighborFeature, create_data_loader, plot_slices
     
     epochs = 150
     start_epoch = 0

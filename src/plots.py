@@ -1,14 +1,15 @@
+import os
 import matplotlib.gridspec as gridspec
+import matplotlib.image as im
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
-
 from pathlib import Path
 from typing import Any
 
+
 def plot_from_path(path, slices, thicknesses=None, axes=None, **kwargs):
-    from data import NiiPoint
+    from src.data import NiiPoint
     nii = NiiPoint.from_path(path, device="cpu", dtype=torch.float32, ensure_lps=True)
     return nii.plot_slices_nii(slices, thicknesses=thicknesses, axes=axes, **kwargs)
 
@@ -41,7 +42,7 @@ def plot_cta_and_segmentation(
     import matplotlib.pyplot as plt
     import torch
 
-    from data import NiiPoint
+    from src.data import NiiPoint
 
     input_case_path = Path(input_case_path).expanduser().resolve()
     prediction_case_path = Path(prediction_case_path).expanduser().resolve()
@@ -147,3 +148,64 @@ def plot_slices(data_torch, pixdims, slices, thicknesses=None, axes=None, **kwar
 
     plt.tight_layout()
     return plt.gca()
+
+
+def validation_plots(durag, loader, path, epoch, loss_fn, neighbor_count, num_vals=3):
+    iter_val = iter(loader)
+    loss_val = 0.0
+    os.makedirs(f"{path}_img", exist_ok=True)
+    for i in range(num_vals):
+        val_batch = next(iter_val)
+        x_val = val_batch["input"].to("cuda", dtype=torch.float32, non_blocking=True)
+        y_val = val_batch["output"].to("cuda", dtype=torch.float32, non_blocking=True)
+        pixdim = val_batch["pixdim"].squeeze()
+        case_id_batch = val_batch.get("case_id", None)
+        
+        x_nei = durag.neighbor_loader.get_neighbors(x_val, ignore_case_id=case_id_batch)
+        x_val_aug = torch.cat((x_val, x_nei), dim=1)
+        ynet_val = durag.net(x_val_aug)
+        val_loss = loss_fn(ynet_val, y_val)
+        loss_val += val_loss.item()
+
+        title = f"Epoch {epoch} Prediction"
+
+        slices = (0.4, 0.4, 0.4)
+        thicknes = (10, 10, 10)
+        kwargs = {"vmin": -1, "vmax": 1, "cmap": "gray"}
+        plot_slices(ynet_val[0, 0].cpu(), pixdim, slices, (1,1,1), **kwargs)
+        plt.gca().set_title(title)
+        plt.gcf().savefig(f"{path}_img/pred{i}.png")
+        plot_slices(y_val[0, 0].cpu(), pixdim, slices, thicknes, **kwargs)
+        plt.gca().set_title(title)
+        plt.gcf().savefig(f"{path}_img/out{i}.png")
+        plot_slices(x_val[0, 0].cpu(), pixdim, slices, thicknes, **kwargs)
+        plt.gca().set_title(title)
+        plt.gcf().savefig(f"{path}_img/inp{i}.png")
+        for j in range(neighbor_count):
+            plot_slices(x_nei[0, 2 * j].cpu(), pixdim, slices, thicknes, **kwargs)
+            plt.gca().set_title(title)
+            plt.gcf().savefig(f"{path}_img/nei{j}_inp{i}.png")
+            plot_slices(x_nei[0, 2 * j + 1].cpu(), pixdim, slices, thicknes, **kwargs)
+            plt.gca().set_title(title)
+            plt.gcf().savefig(f"{path}_img/nei{j}_out{i}.png")
+        plt.close('all')
+
+    loss_val = loss_val / num_vals
+    
+    
+    col_count = 3 + 2 * neighbor_count
+    plt.figure(figsize=(10 * col_count, 10 * num_vals))
+    for i in range(num_vals):
+        neighbor_targets = []
+        for k in range(neighbor_count):
+            neighbor_targets.extend([f"nei{k}_inp", f"nei{k}_out"])
+        for j, target in enumerate(["pred", "out", "inp"] + neighbor_targets):
+            plt.subplot(3, col_count, i*col_count + j + 1)
+            plt.imshow(im.imread(f"{path}_img/{target}{i}.png"))
+            plt.axis('off')
+    plt.tight_layout()
+    plt.savefig(f"{path}_examples.png")
+    plt.close('all')
+
+    print(f"Epoch {epoch} Validation Loss: {loss_val:.4f}")
+    return loss_val

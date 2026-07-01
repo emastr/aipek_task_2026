@@ -1,129 +1,181 @@
+from typing import List, Sequence, Tuple, Optional
 import torch
-import hashlib
-from typing import List, Optional, Sequence, Tuple
-from monai.data import DataLoader, PersistentDataset, list_data_collate
-from monai.transforms import (
-    Compose,
-    LoadImaged,
-    EnsureChannelFirstd,
-    EnsureTyped,
-    CenterSpatialCropd,
-    Lambdad,
-    Transposed,
-    MapTransform,
-    RandSpatialCropSamplesd,
-    Resized,
-)
+from torch import nn
 import os
-import shutil
+from src.data import NiiPoint
+import torch.nn.functional as F
+from monai.networks.nets import UNet
+from src.data import _build_volume_transforms
+import hashlib
 
 
-def _make_contiguous(x):
-    return x.contiguous()
-
-
-def _build_volume_transforms(size):
-    return Compose([
-        LoadImaged(keys=["input", "output"]),
-        EnsureChannelFirstd(keys=["input", "output"]),
-        ExtractSpacingd(keys=["input"], init_sizes=512, out_sizes=size),
-        Transposed(keys=["input", "output"], indices=[0, 3, 1, 2]),
-        Lambdad(keys=["input", "output"], func=_make_contiguous),
-        CenterSpatialCropd(keys=["input", "output"], roi_size=(-1, 512, 512)),
-        EnsureTyped(keys=["input", "output"], track_meta=False),
-        Resized(
-            keys=["input", "output"],
-            spatial_size=(-1, size, size),
-            mode=("trilinear", "nearest"),
-        ),
-    ])
-
-class ExtractSpacingd(MapTransform):
-    """
-    Custom transform to pull the pixdim out of the NIfTI header
-    and save it as a new key in the data dictionary.
-    """
-    def __init__(self, keys, init_sizes, out_sizes, meta_key_postfix="meta_dict"):
-        super().__init__(keys)
-        self.init_sizes = init_sizes
-        self.out_sizes = out_sizes
-        self.meta_key_postfix = meta_key_postfix
-
-    def __call__(self, data):
-        d = dict(data)
-        img = d["input"]
-        spacing = torch.tensor(img.meta["pixdim"][1:4])
-        spacing[:2] *= self.init_sizes / self.out_sizes
-        d[f"pixdim"] = spacing
-        return d
-
-class VerticalPositionEmbedding(MapTransform):
-    """
-    Custom transform to add a vertical position embedding to the input data.
-    The embedding is a 2D array where each row corresponds to a slice and contains
-    the normalized vertical position of that slice in the volume.
-    """
-    def __init__(self, keys):
-        super().__init__(keys)
-
-    def __call__(self, data):
-        d = dict(data)
-        img = d[self.keys[0]]
-        pixdim_z = d["pixdim"][-1]
-        num_slices = img.shape[1]
-        vertical_positions = torch.arange(num_slices).float() / (num_slices - 1) - 0.5
-        vertical_positions = vertical_positions.to(img.device, dtype=img.dtype)
-        vertical_positions = vertical_positions.view(
-            1, num_slices, 1, 1
-            ).expand(
-            -1, img.shape[1], img.shape[2], img.shape[3]
-            ) * pixdim_z.view(-1, 1, 1, 1)
-        d["input"] = torch.cat((img, vertical_positions), dim=0)
-        return d
+class NiiKNN(nn.Module):
     
-class DeterministicSliceDataset(torch.utils.data.Dataset):
-    def __init__(self, 
-                 base_dataset, 
-                 channels, 
-                 size, 
-                 num_slices=1,
-                random_flip=False,
-                random_shift=False):
-        self.base_dataset = base_dataset
-        self.channels = channels
-        self.size = size
-        self.num_slices = num_slices
-        self.vertical_position_embedding = VerticalPositionEmbedding(keys=["input"])
+    def __init__(self, k, img_path, label_path, max_num=None):
+        super().__init__()
+        self.k = k
+        self.label_path = label_path
+        self.img_path = img_path
+        self.max_num = max_num
+        
+    def forward(self, x: NiiPoint):
+        files = os.listdir(self.img_path)
+        # read dataset.json to get size
+        num_data = len(files)
+        dist = torch.zeros(num_data, device="cuda")
+        for i,file in enumerate(files):
+            print(f"Calculating distance for {file}...", end="\r")
+            img = NiiPoint.from_path(os.path.join(self.img_path, file), "cuda")
+            diff = x - img
+            dist[i] = torch.mean(diff.data**2)**0.5
+            if self.max_num is not None and i >= self.max_num:
+                break
+            
+        sorted_idx = torch.argsort(dist)
+        for i in range(self.k):
+            idx = sorted_idx[i]
+            file = files[idx]
+            label_file = f"{file[:9]}_0001.nii.gz"
+            xi = NiiPoint.from_path(os.path.join(self.img_path, file), "cuda")
+            yi = NiiPoint.from_path(os.path.join(self.label_path, label_file), "cuda")    
+            if i == 0:
+                x = xi * (1 / self.k)
+                y = yi * (1 / self.k)
+            else:
+                x = x + xi * (1 / self.k)
+                y = y + yi * (1 / self.k)
+        return x, y
+    
 
+class NiiCKNN(nn.Module):
+    
+    def __init__(self, k, kernel_size, img_path, label_path, max_num=None, max_batch=None):
+        super().__init__()
+        self.k = k
+        self.kernel_size = kernel_size
+        self.label_path = label_path
+        self.img_path = img_path
+        self.max_num = max_num
+        self.max_batch = max_batch
+        self.case_ids = [file[:9] for file in os.listdir(self.img_path)]
+        self.data_size = len(self.case_ids)
+    
+    def sliding_l2(self, x_pt: torch.Tensor, pixdims: tuple):
+        kernel_size = [2 * int(self.kernel_size[i] / pixdims[i]) + 1 for i in range(3)]
+        pad = [int((kernel_size[i] - 1) / 2) for i in range(3)]
+        padding = (pad[2], pad[2], pad[1], pad[1], pad[0], pad[0])
+        x_pt = x_pt ** 2
+        x_pt = F.pad(x_pt.unsqueeze(1), padding, mode='constant', value=0.0)
+        weight = torch.ones((1, 1,) + tuple(kernel_size), dtype=x_pt.dtype, device=x_pt.device)
+        sliding_sum = F.conv3d(x_pt, weight, stride=1)
+        return sliding_sum.squeeze(1)
+
+    
+    def forward(self, x: NiiPoint):
+        with torch.no_grad():
+            files = os.listdir(self.img_path)
+            # read dataset.json to get size
+            sqdist = torch.full(x.data.shape, torch.inf, device="cuda")                     # track closest block distance
+            x_est = torch.zeros_like(x.data, device="cuda")                                   # track closest block image
+            y_est = torch.zeros_like(x.data, device="cuda")  
+            
+            
+            for b in range(min(self.max_batch, len(files) // self.max_num)):
+                img = torch.zeros((self.max_num, ) + x.data.shape, device="cuda")
+                lab = torch.zeros((self.max_num, ) + x.data.shape, device="cuda")
+                
+                print(f"Processing batch {b + 1}/{min(self.max_batch, len(files) // self.max_num)}...", end="\r")
+                for i in range(self.max_num):
+                    xi, yi = self.load_case(i + b * self.max_num)
+                    img[i, :, :, :] = xi.interpolate_to(x.data.shape).data
+                    lab[i, :, :, :] = yi.interpolate_to(x.data.shape).data
+                
+                
+                sqdists_all = self.sliding_l2(
+                    x.data[None, :, :, :] - img, 
+                    pixdims = x.header.get_zooms()
+                    )
+                
+                sqdist_new, args = torch.min(sqdists_all, dim=0)
+                x_new = torch.gather(img, 0, args[None, :, :, :]).squeeze(0)
+                y_new = torch.gather(lab, 0, args[None, :, :, :]).squeeze(0)
+                
+                x_est = torch.where(sqdist_new < sqdist, x_new, x_est)
+                y_est = torch.where(sqdist_new < sqdist, y_new, y_est)
+                sqdist = torch.min(sqdist, sqdist_new)
+                if self.max_num is not None and i >= self.max_num:
+                    break
+        
+            return NiiPoint(x_est, x.affine, x.header), NiiPoint(y_est, x.affine, x.header)
+
+    def load_case(self, idx):
+        assert idx < self.data_size, f"Index {idx} out of range for dataset of size {self.data_size}"
+        case_id = self.case_ids[idx]
+        img_file = f"{case_id}_0000.nii.gz"
+        label_file = f"{case_id}_0001.nii.gz"
+        img = NiiPoint.from_path(os.path.join(self.img_path, img_file), "cuda")
+        label = NiiPoint.from_path(os.path.join(self.label_path, label_file), "cuda")    
+        return img, label
+    
+    
+class DURAG(nn.Module):
+    def __init__(self, net, neighbor_loader):
+        super().__init__()
+        self.net = net
+        self.neighbor_loader = neighbor_loader
+
+    def forward(self, inp):
+        x, case_id_batch = inp
+        x_nei = self.neighbor_loader.get_neighbors(x, ignore_case_id=case_id_batch)
+        x_aug = torch.cat((x, x_nei), dim=1)
+        return self.net(x_aug)
+    
     @staticmethod
-    def _center_crop_or_pad_depth(volume, target_depth):
-        depth = volume.shape[1]
-        if depth == target_depth:
-            return volume.contiguous()
+    def init_large_durag(neighbor_loader, dropout=0.1):
+        neighbor_count = neighbor_loader.neighbors
+        net = UNet(
+            spatial_dims = 3, 
+            in_channels = 2 + 2 * neighbor_count,
+            out_channels = 1, 
+            strides = (2, 2, 2),          # Downsampling factors
+            channels = (64, 64, 128, 256), # old: (16, 32, 64, 128)  # Res: (128, 64, 32, 16)
+            kernel_size=3, 
+            up_kernel_size=3, 
+            num_res_units=2,
+            dropout=dropout
+        ).to("cuda", dtype=torch.float32)
+        return DURAG(net, neighbor_loader)
 
-        if depth > target_depth:
-            start = (depth - target_depth) // 2
-            return volume[:, start:start + target_depth].contiguous()
 
-        pad_before = (target_depth - depth) // 2
-        pad_after = target_depth - depth - pad_before
-        return torch.nn.functional.pad(volume, (0, 0, 0, 0, pad_before, pad_after), value=-1.).contiguous()
+    def validate(self, valid_loader, criterion):
+        self.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for b, (x, y) in enumerate(valid_loader):
+                x = x.to("cuda", dtype=torch.float32)
+                y = y.to("cuda", dtype=torch.float32)
+                inp = (x, None)
+                y_hat = self(inp)
+                loss = criterion(y_hat, y)
+                val_loss += loss.item()
+        self.train()
+        return val_loss / len(valid_loader)
 
-    def __len__(self):
-        return len(self.base_dataset)
 
-    def __getitem__(self, idx):
-        volume = self.base_dataset[idx]
-        sample = dict(volume)
-        sample["input"] = self._center_crop_or_pad_depth(sample["input"], self.channels)
-        sample["output"] = self._center_crop_or_pad_depth(sample["output"], self.channels)
-        sample = self.vertical_position_embedding(sample)
-
-        if "case_id" not in sample and "case_id" in volume:
-            sample["case_id"] = volume["case_id"]
-        sample["case_idx"] = torch.tensor(idx, dtype=torch.long)
-
-        return [sample]
+def pick_optimal_durag(durag, valid_loader, criterion, save_path):
+    saved_models = [f for f in os.listdir(save_path) if f.endswith(".pt")]
+    best_model = None
+    best_model_file = None
+    best_val_loss = float("inf")
+    for model_file in saved_models:
+        model_path = os.path.join(save_path, model_file)
+        durag.net.load_state_dict(torch.load(model_path), strict=False)
+        val_loss = durag.validate(valid_loader, criterion)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model = model_file
+            best_model_file = model_file
+    return best_model, best_val_loss, best_model_file
 
 
 class NeighborLoader:
@@ -134,7 +186,6 @@ class NeighborLoader:
         label_dir: str,
         channels: int, # Number of slices per chunk
         neighbors: int = 2, # Number of neighboring slices to include on each side
-        num_slices: int = 1, # Number of slices per chunk
         device: str = "cuda",
         size: int = 128,
         coarse_size: int = 32,
@@ -145,7 +196,6 @@ class NeighborLoader:
         self.label_dir = label_dir
         self.channels = channels
         self.neighbors = neighbors
-        self.num_slices = num_slices
         self.device = device
         self.size = size
         self.coarse_size = coarse_size
@@ -384,76 +434,3 @@ class NeighborLoader:
 
         result = torch.stack(neighbors_batch, dim=0)
         return result.to(device=x.device, dtype=x.dtype)
-        
-        
-    
-def create_data_loader(
-    image_dir,
-    label_dir,
-    channels,
-    batch_size,
-    device,
-    num_slices=1,
-    size=128,
-    clear_cache=True,
-    random_flip=False,
-    random_shift=False
-):
-    # Use a transform-specific cache folder to avoid stale data reuse.
-    cache_dir = ".monai_cache"
-    if clear_cache and os.path.isdir(cache_dir):
-        print(f"Clearing MONAI cache: {cache_dir}")
-        shutil.rmtree(cache_dir)
-    os.makedirs(cache_dir, exist_ok=True)
-
-    case_ids = sorted([file[:9] for file in os.listdir(image_dir) if file.endswith(".nii.gz")])
-    
-    
-    data_dicts = [
-        {"input": os.path.join(image_dir, f"{case_id}_0000.nii.gz"),
-         "output": os.path.join(label_dir, f"{case_id}_0001.nii.gz"),
-         "case_id": case_id}
-        for case_id in case_ids
-    ]
-
-    
-    volume_transforms = _build_volume_transforms(size=size)
-    
-    # Create persistent part    
-    print("Creating PersistentDataset...")
-    persistent_ds = PersistentDataset(
-        data=data_dicts,
-        transform=volume_transforms,
-        cache_dir=cache_dir
-    )
-
-    # Online slicing part
-    sliced_ds = DeterministicSliceDataset(
-        base_dataset=persistent_ds,
-        channels=channels,
-        size = size,
-        num_slices = num_slices,
-        random_flip=random_flip,
-        random_shift=random_shift
-    )
-
-    train_loader = DataLoader(
-        sliced_ds,
-        batch_size=batch_size,   
-        shuffle=True,   
-        num_workers=16,
-        collate_fn=list_data_collate, 
-        pin_memory=True
-    )
-    return train_loader
-
-
-
-def plot_slices_batch(data_torch, pixdims, slices, thicknesses=None, axes=None, **kwargs):
-    for data_i, pixdim_i in zip(data_torch, pixdims):
-        plot_slices(data_i.squeeze(), pixdim_i.cpu().numpy(), slices, thicknesses, axes, **kwargs)
-        
-        
-def plot_slices(data_torch, pixdim, slices, thicknesses=None, axes=None, **kwargs):
-    from scripts.plots import plot_slices
-    plot_slices(data_torch.permute(1, 2, 0), pixdim, slices, thicknesses, axes, **kwargs)

@@ -10,9 +10,9 @@ if __name__ == "__main__":
     torch.manual_seed(0)
 
     import matplotlib.pyplot as plt
-    from data import CONSTANTS
+    from src.processing import CONSTANTS
     from monai.networks.nets import BasicUNet
-    from data_monai import create_data_loader, plot_slices
+    from src.data import create_data_loader, plot_slices
     
     epochs = 2_000
     epoch_start = 695

@@ -1,7 +1,7 @@
 import torch
-import nibabel as nib
 
-from scripts.plots import plot_slices
+from src.data import NiiPoint
+
 
 class CONSTANTS:
     BACK = 0    # Background
@@ -18,78 +18,6 @@ class CONSTANTS:
     NORM_PRED_PATH = "nnUNet_raw/Predictions_val/"
     PRED_PATH = "nnUNet_raw/Predictions_val_small/"
     
-
-class NiiPoint():
-    @ staticmethod
-    def from_path(path, device, dtype=torch.float32, tfm=None, ensure_lps=False):
-        nii = nib.load(path)
-        if ensure_lps:
-            src_ornt = nib.orientations.io_orientation(nii.affine)
-            lps_ornt = nib.orientations.axcodes2ornt(("L", "P", "S"))
-            to_lps = nib.orientations.ornt_transform(src_ornt, lps_ornt)
-            nii = nii.as_reoriented(to_lps)
-        data_np = nii.get_fdata()
-        data = torch.from_numpy(data_np).to(device, dtype=dtype)
-        return NiiPoint(data, nii.affine, nii.header, device, dtype, tfm)
-    
-    def save_to_path(self, path):
-        data_np = self.data.cpu().numpy()
-        nii = nib.Nifti1Image(data_np, self.affine, self.header)
-        nib.save(nii, path)
-    
-    def __init__(self, data, affine, header, device=None, dtype=torch.float32, tfm=None):
-        if device is not None:
-            self.data = data.to(device, dtype=dtype)
-        else:
-            self.data = data.to(dtype=dtype)
-        if tfm is not None:
-            self.data = tfm(self.data)
-        self.affine = affine
-        self.header = header
-        
-    def __add__(self, other):
-        result = NiiPoint(self.data.clone(), self.affine, self.header, self.data.device)
-        if result.data.shape != other.data.shape:
-            other = other.interpolate_to(result.data.shape)
-        result.data = self.data + other.data
-        return result
-    
-    def __sub__(self, other):
-        result = NiiPoint(self.data.clone(), self.affine, self.header, self.data.device)
-        if result.data.shape != other.data.shape:
-            other = other.interpolate_to(result.data.shape)
-        result.data = self.data - other.data
-        return result
-    
-    def __mul__(self, other):
-        if other.__class__ == float or other.__class__ == int:
-            result = NiiPoint(self.data.clone(), self.affine, self.header, self.data.device)
-            result.data = self.data * other
-            return result
-        else:    
-            assert self.data.shape == other.data.shape, "Data shapes must match for multiplication"
-            result = NiiPoint(self.data.clone(), self.affine, self.header, self.data.device)
-            result.data = self.data * other.data
-            return result
-    
-    
-    def interpolate_to(self, target_shape):
-        result = NiiPoint(self.data.clone(), self.affine, self.header, self.data.device)
-        result.data = torch.nn.functional.interpolate(
-            self.data.unsqueeze(0).unsqueeze(0), 
-            size=target_shape, mode='trilinear', align_corners=False
-        ).squeeze(0).squeeze(0)
-        return result
-    
-    def apply_tfm(self, tfm):
-        new = NiiPoint(self.data.clone(), self.affine, self.header, self.data.device)
-        new.data = tfm(new.data, new.affine, new.header)
-        return new
-        
-        
-    def plot_slices_nii(self, slices, thicknesses=None, axes=None,**kwargs):
-        return plot_slices(self.data, self.header.get_zooms(), slices, thicknesses, axes, **kwargs)
-
 
 class DataTfmLibrary: 
     @staticmethod
@@ -206,3 +134,33 @@ class BaseTfmLibrary:
             haf = (upper - lower)/2
             return data * haf + mid
         return _tfm
+
+
+def transform_vessel_to_cta(prediction_data_path, ncct_data_path, output_data_path):
+    # Load the predictions and NCCT data
+    vessel_normalized = NiiPoint.from_path(prediction_data_path, device="cpu")
+    ncct_data = NiiPoint.from_path(ncct_data_path, device="cpu")
+    vessel = DataTfmLibrary.inv_vessel_normalization_tfm(vessel_normalized)
+    cta_data = DataTfmLibrary.inv_vessel_tfm(ncct_data, vessel)
+    cta_data.save_to_path(output_data_path)
+
+
+def transform_all(root_pred, root_ncct, root_output, id_subset=None):
+    import os
+    from pathlib import Path
+
+    root_pred = Path(root_pred)
+    root_ncct = Path(root_ncct)
+    root_output = Path(root_output)
+
+    for pred_file in os.listdir(root_pred):
+        if pred_file.endswith(".nii.gz"):
+            case_id = pred_file.split("_")[1]
+            if id_subset is not None and int(case_id) not in id_subset:
+                continue
+            ncct_file = f"case_{case_id}_0000.nii.gz"
+            output_file = f"case_{case_id}_0001.nii.gz"
+            pred_path = root_pred / pred_file
+            ncct_path = root_ncct / ncct_file
+            output_path = root_output / output_file
+            transform_vessel_to_cta(pred_path, ncct_path, output_path)
