@@ -1,7 +1,7 @@
 {
     "channel_names": {
-        "0": "NCCT_norm",
-        "1": "VSL_norm"
+        "0": "NCCT",
+        "1": "CTA"
     },
     "numTraining": 134,
     "numTest": 15,

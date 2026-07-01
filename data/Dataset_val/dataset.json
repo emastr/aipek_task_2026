@@ -1,0 +1,11 @@
+{
+    "channel_names": {
+        "0": "NCCT_norm",
+        "1": "VSL_norm"
+    },
+    "numTraining": 107,
+    "numTest": 15,
+    "numValidation": 27,
+    "file_ending": ".nii.gz",
+    "val_split": 0.2
+}
