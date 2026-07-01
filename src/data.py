@@ -412,7 +412,7 @@ class DuragValSaver:
         restored_hwd = restored.squeeze(0).permute(1, 2, 0).contiguous()
         return restored_hwd
 
-    def save(self, pred, inverse_meta, output_path=None):
+    def save(self, pred, inverse_meta, output_path=None, legacy_fmt=False):
         restored_hwd = self.invert_to_original(pred, inverse_meta)
         ref_nii = nib.load(inverse_meta.input_path)
         out_path = output_path

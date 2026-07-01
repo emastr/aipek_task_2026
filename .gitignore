@@ -10,3 +10,4 @@ checkpoints/*
 *.nii.gz
 container_topcow_nic
 TopCoWSubmissions
+preds

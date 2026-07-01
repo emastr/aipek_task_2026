@@ -168,16 +168,16 @@ Below are segmentation results from running CoW segmentation on the CTA data for
 
 
 #### Segmentation, CTA (ground truth)
-![img](figures/segmentation_0007_cta.png)
+![img](figures/segmentation_0010_cta.png)
 
 #### Predicted Segmentation, 3-NN
-![img](figures/segmentation_0007_knn.png)
+![img](figures/segmentation_0010_knn.png)
 
 #### Predicted Segmentation, convolutional 1-NN
-![img](figures/segmentation_0007_cknn.png)
+![img](figures/segmentation_0010_cknn.png)
 
 #### Predicted Segmentation, DURAG
-![img](figures/segmentation_0007_durag.png)
+![img](figures/segmentation_0010_durag.png)
 
 
 ## Conclusions
