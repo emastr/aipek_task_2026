@@ -6,7 +6,6 @@ import subprocess
 import glob
 from pathlib import Path
 from typing import Any
-
 import nibabel as nib
 
 
@@ -158,105 +157,4 @@ def _save_from_lps_to_orientation(src_lps_path: Path, dst_path: Path, target_orn
     to_target = nib.orientations.ornt_transform(lps_ornt, target_ornt)
     target_img = src_img.as_reoriented(to_target)
     nib.save(target_img, str(dst_path))
-
-
-def plot_case_result_with_input(
-    input_case_path: str | Path,
-    prediction_case_path: str | Path,
-    slices = None,
-    thickness = None,
-    device: str = "cpu",
-    figsize: tuple[int, int] = (12, 12),
-) -> Any:
-    """Plot CTA-only, segmentation-only, and overlay views for one case.
-
-    The function uses plot utilities from data.py (NiiPoint.plot_slices_nii) and
-    creates three rows of orthogonal slices:
-      1) CTA only,
-      2) segmentation only,
-      3) overlay of segmentation on CTA.
-
-    Args:
-        input_case_path: Path to input image NIfTI (.nii.gz).
-        prediction_case_path: Path to predicted mask NIfTI (.nii.gz).
-        device: Torch device for loading (default "cpu").
-        figsize: Figure size for the 3x3 panel.
-
-    Returns:
-        The matplotlib Figure object.
-    """
-    import matplotlib.pyplot as plt
-    import torch
-
-    from data import NiiPoint
-
-    input_case_path = Path(input_case_path).expanduser().resolve()
-    prediction_case_path = Path(prediction_case_path).expanduser().resolve()
-
-    if not input_case_path.exists():
-        raise FileNotFoundError(f"Input case not found: {input_case_path}")
-    if not prediction_case_path.exists():
-        raise FileNotFoundError(f"Prediction case not found: {prediction_case_path}")
-
-    img = NiiPoint.from_path(input_case_path, device=torch.device(device), dtype=torch.float32, ensure_lps=True)
-    pred = NiiPoint.from_path(prediction_case_path, device=torch.device(device), dtype=torch.float32, ensure_lps=True)
-
-    if img.data.shape != pred.data.shape:
-        pred = pred.interpolate_to(img.data.shape)
-
-    # Pick a representative location from the prediction mask if available.
-    nz = torch.nonzero(pred.data > 0)
-    if slices is not None:
-        slices = [float(s) for s in slices]
-    elif nz.numel() > 0:
-        center = nz.float().mean(dim=0)
-        slices = [
-            float(center[0].item() / max(1, img.data.shape[0] - 1)),
-            float(center[1].item() / max(1, img.data.shape[1] - 1)),
-            float(center[2].item() / max(1, img.data.shape[2] - 1)),
-        ]
-    else:
-        slices = [0.5, 0.5, 0.5]
-
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
-
-
-    thickness = (1, 1, 1) if thickness is None else tuple(thickness)
-    # Row 1: CTA only
-    #img.plot_slices_nii(slices, thickness, axes=axes[0], cmap="gray")
-
-    # Row 2: overlay
-    img.plot_slices_nii(slices, thickness, axes=axes, cmap="gray")
-    data = pred.data.clone()
-    data = torch.where(data==0, torch.nan, data)
-    pred_overlay = NiiPoint(data, pred.affine, pred.header, pred.data.device)
-    overlay_cmap = plt.get_cmap("Set3").copy()
-    overlay_cmap.set_bad(alpha=0.0)
-    pred_overlay.plot_slices_nii(slices, 
-                                 (data.shape[0]//2, data.shape[1]//2, data.shape[2]//2), 
-                                 axes=axes, 
-                                 cmap=overlay_cmap, 
-                                 alpha=1.0, 
-                                 interpolation="nearest")
-    
-    return fig
-
-
-if __name__ == "__main__":
-    cases = ["cta", "ncct", "cknn", "knn", "unet", "unet_weighted", "swinunetr"]
-
-    for case, filterc in zip(
-        cases, 
-        [False, False, True, True, False, False, False]): # Filter out the ones that we already ran
-        data_path = f"nnUNet_raw/Predictions_val_small/images_{case}/"
-        output_path = f"nnUNet_raw/Predictions_val_small/segment_{case}/"
-
-        if filterc:
-            run_topcow_inference(
-                data_path,
-                output_path,
-                track="ct",
-                repo_root="",
-                cases=[7, 10, 12]
-            )
 

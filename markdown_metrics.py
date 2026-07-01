@@ -141,48 +141,7 @@ def _format_mean_ci(values: list[float]) -> str:
 	ci = 2.0 * std / math.sqrt(max(arr.size, 1))
 	return f"${mean:.1f}\\% \\pm {ci:.1f}\\%$"
 
-if __name__ == "__main__":
-	root_pred_norm = "nnUNet_raw/Predictions_val"
-	root_pred = "nnUNet_raw/Predictions_val_small"
-	root_raw = "nnUNet_raw/Dataset"
-	root_norm = "nnUNet_raw/Dataset_val"
-	vessel_norm_path = f"{root_norm}/labelsVl/"
-	vessel_path = f"{root_raw}/labelsTr/"
-	ncct_path = f"{root_raw}/imagesTr/"
-	ncct_norm_path = f"{root_norm}/imagesVl/"
-	vessel_pred_norm_path = lambda model: (
-		f"{root_pred_norm}/images_{model}/"
-	)
-	vessel_pred_path = lambda model: (
-		f"{root_pred}/images_{model}/"
-	)
 
-	models = ["cknn", "knn"]
-
-	rows = []
-	for model in models:
-		vessel_pred_norm = vessel_pred_norm_path(model)
-		vessel_pred = vessel_pred_path(model)
-		rows.append(
-			evaluate_metrics_to_markdown(
-				model_name=model,
-				vessel_norm_path=vessel_norm_path,
-				ncct_norm_path=f"{root_norm}/imagesVl/",
-				ncct_path=f"{root_raw}/imagesTr/",
-				cta_path=f"{root_raw}/labelsTr/",
-				vessel_norm_pred_path=vessel_pred_norm,
-				cta_pred_path=vessel_pred,
-				beta=0.1,
-			)
-		)
-
-	table = [
-		f"| Model | $\\mathrm{{NL1_{{vessel}}}}$ | $\\mathrm{{NL1_{{CTA}}}}$ | $\\mathrm{{IoU_{{vessel}}}}(0.1)$ |",
-		"|---|---|---|---|",
-		*rows,
-	]
-	print("\n".join(table))
-        
 
         
 

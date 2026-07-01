@@ -7,15 +7,16 @@ python -m scripts.<file name without .py>
 ```
 similarly, all the notebooks rely only on relative imports. For the code to work, you must download the [training data](link.com), unzip it and move the folder nnUNet_raw into root.
 
-### Training dependencies
+##### Training dependencies
 * ``torch`` (cuda is hard coded, if you have cpu only, Ctr+F replace "cuda" with "cpu" in the entire repo will do the trick).
 * ``monai`` (A deep learning + medical imaging library)
 * ``matplotlib``
 
 
-### Evaluation dependencies
+##### Evaluation dependencies
 * The [TopCoWSubmissions](https://github.com/fmusio/TopCoWSubmissions) library, which requires
 * [nnDetection](https://github.com/MIC-DKFZ/nnDetection?tab=readme-ov-file#source) and [nnUNet](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md#installation-instructions), which in turn have extra dependencies.
+* Replace ``inference.py`` in the TwoCowSubmissions folder with ``scripts/inference.py``. This changes the inference to pick the best candidate CoW instead of thresholding.
 
 
 ## Assumptions
@@ -88,15 +89,17 @@ The sliding window 1-NN can be implemented as a 3 layer CNN with one filter per 
 
 
 ## Training
-For training, i use 
+I call my method DURAG, the Deep U-net with Retrieval Augmentated Guiding (since it is not Generative, the network simply uses a retrieval-augmented input to guide its output). For training, I use 
 * 3D UNet implementation from the MONAI package. 
-* The input image is three channels: $[\tilde x, \tilde y_{n^*(\tilde x)}, p(\tilde x)]$, where 
+* The input image is 8 channels: $[\tilde x, \tilde x_{I_1^*(\tilde x)}, \tilde y_{I_1^*(\tilde x)},\tilde x_{I_2^*(\tilde x)}, \tilde y_{I_2^*(\tilde x)}, \tilde x_{I_3^*(\tilde x)},\tilde y_{I_3^*(\tilde x)}, p(\tilde x)]$, where 
 $$
-    n^*(\tilde x) = \arg\min_n\{\|P_{32}(\tilde x_n) -  P_{32}(\tilde x)\|\colon n=1,\dots, N, \tilde x\neq \tilde x_n\},
+    I^*(\tilde x) = \arg\mathrm{sort}_n\{\|P_{32}(\tilde x_n) -  P_{32}(\tilde x)\|\colon n=1,\dots, N, \tilde x\neq \tilde x_n\},
 $$
 i.e. the input, nearest neighbor from the data set (in a 32 pixel interpolation), and a vertical position encoding $p(\tilde x)$. This is the same principle as alpha-fold or RAG, but searching through coarse copies of the data instead of embeddings.
-* ADAM optimizer with cosine annealing
-* Data augmentation. Reflection about the sagittal (left/right) plane, and random affine transformation - simultaneously applied to input and output.
+* Precomputed $\{(I^*_m(x_n))_{m=1,2,3}\}_{n=1}^N$, which speeds up training. Important to do before augmentation.
+* Data augmentation: Random sagittal plane (LR) reflection and affine transformation (after the nearest neighbor search).
+* ADAM optimizer with cosine annealing, batch size 16. 
+* Training on 24 GB Vram GeForce RTX 3090. Minimum Vram without checkpointing is 2GB for single data, and 13 GB for batch size 16.
 
 
 ## Evaluation
@@ -142,11 +145,32 @@ The baselines obtain 7% NL1 error on the CTA validation data, but 100% NL1 and o
 
 ## Qualitative Results
 
-Below are segmentation results from running CoW segmentation on the CTA data for case 0007 (in my validation set, not trained on), using the different models. Reproducing these results requires installing the TopCoW
+First I compare the predicted vessel structure from the different models on a valudation case 0007. 
+
+#### Vessel structure for CTA (ground truth)
+![img](figures/vessel_0007_cta.png)
+
+#### Predicted vessel structure, 3-NN
+![img](figures/vessel_0007_knn.png)
+
+#### Predicted vessel structure, convolutional 1-NN
+![img](figures/vessel_0007_cknn.png)
+
+#### Predicted vessel structure, DURAG
+![img](figures/vessel_0007_durag.png)
+
+
+Below are segmentation results from running CoW segmentation on the CTA data for case 0007 (in my validation set, not trained on), using the different models. Reproducing these results requires installing the TopCoWSubmissions library, as specified before. The knn algorithm results in vessels at the correct spot but wrong shape, and convolutional 1-NN hallucinates new vessels all over.
+
+
+#### Segmentation, CTA (ground truth)
 ![img](figures/segmentation_0007_cta.png)
 
-The knn algorithm results in vessels at the correct spot but wrong shape
+#### Predicted Segmentation, 3-NN
 ![img](figures/segmentation_0007_knn.png)
 
-And convolutional 1-NN hallucinates new vessels all over.
+#### Predicted Segmentation, convolutional 1-NN
 ![img](figures/segmentation_0007_cknn.png)
+
+#### Predicted Segmentation, DURAG
+![img](figures/segmentation_0007_durag.png)

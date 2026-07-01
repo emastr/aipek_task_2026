@@ -1,8 +1,7 @@
 import torch
 import nibabel as nib
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import numpy as np
+
+from scripts.plots import plot_slices
 
 class CONSTANTS:
     BACK = 0    # Background
@@ -16,6 +15,8 @@ class CONSTANTS:
     NORM_DATA_PATH_VAL_OUT = "nnUNet_raw/Dataset_val/labelsVl/"
     NORM_DATA_PATH_TRAIN_INP = "nnUNet_raw/Dataset_val/imagesTr/"
     NORM_DATA_PATH_TRAIN_OUT = "nnUNet_raw/Dataset_val/labelsTr/"
+    NORM_PRED_PATH = "nnUNet_raw/Predictions_val/"
+    PRED_PATH = "nnUNet_raw/Predictions_val_small/"
     
 
 class NiiPoint():
@@ -88,60 +89,6 @@ class NiiPoint():
         
     def plot_slices_nii(self, slices, thicknesses=None, axes=None,**kwargs):
         return plot_slices(self.data, self.header.get_zooms(), slices, thicknesses, axes, **kwargs)
-
-
-def plot_slices(data_torch, pixdims, slices, thicknesses=None, axes=None, **kwargs):
-    data_np = data_torch.cpu().numpy()
-    idx = [int(slices[i] * data_np.shape[i]) for i in range(3)]
-
-    # Axes: (X, Y, Z) = (width, height, depth)
-    if thicknesses is None:
-        slice_data = [
-            data_np[idx[0], :, :],
-            data_np[:, idx[1], :],
-            data_np[:, :, idx[2]]
-        ]
-    elif thicknesses == "all":
-        slice_data = [
-            data_np.max(axis=0),
-            data_np.max(axis=1),
-            data_np.max(axis=2)
-        ]
-        
-    else:
-        slice_data = [
-            np.nanmax(data_np[idx[0]-thicknesses[0]:idx[0]+thicknesses[0], :, :], axis=0),
-            np.nanmax(data_np[:, idx[1]-thicknesses[1]:idx[1]+thicknesses[1], :], axis=1),
-            np.nanmax(data_np[:, :, idx[2]-thicknesses[2]:idx[2]+thicknesses[2]], axis=2)
-        ]
-    
-    pos_slices = [idx[i] * pixdims[i] for i in range(3)]
-    slice_widths = [pixdims[i] * data_np.shape[i] for i in range(3)]
-    plot_widths = [slice_widths[i] for i in [2, 2, 1]]
-    
-    
-    if axes is None:
-        #axes = [
-        #    plt.subplot(1, 3, i+1) for i in range(3)
-        #]
-        sum_wd = sum(plot_widths)
-        ratios = [iw / sum_wd for iw in plot_widths]
-        max_ratio = max(ratios)
-        
-        plt.figure(figsize=(10, 10*max_ratio))
-        gs = gridspec.GridSpec(1, 3, width_ratios=ratios)
-        axes = [plt.gcf().add_subplot(gs[0,i]) for i in range(3)]
-    for i in range(3):
-        j2, j1 = [j for j in range(3) if j != i]
-        axes[i].imshow(slice_data[i], extent=[0, slice_widths[j1], 0, slice_widths[j2]], **kwargs)
-        axes[i].plot([pos_slices[j1], pos_slices[j1]], [0, slice_widths[j2]], 'red', linewidth=1)
-        axes[i].plot([0, slice_widths[j1]], [slice_widths[j2]-pos_slices[j2], slice_widths[j2]-pos_slices[j2]], 'red', linewidth=1)
-        axes[i].set_title(f'{["X", "Y", "Z"][i]} Slice')
-        axes[i].set_aspect("equal")
-        axes[i].axis('off')
-    
-    plt.tight_layout()
-    return plt.gca()
 
 
 class DataTfmLibrary: 

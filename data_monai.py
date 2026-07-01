@@ -255,5 +255,5 @@ def plot_slices_batch(data_torch, pixdims, slices, thicknesses=None, axes=None, 
         
         
 def plot_slices(data_torch, pixdim, slices, thicknesses=None, axes=None, **kwargs):
-    from data import plot_slices
+    from scripts.plots import plot_slices
     plot_slices(data_torch.permute(1, 2, 0), pixdim, slices, thicknesses, axes, **kwargs)
