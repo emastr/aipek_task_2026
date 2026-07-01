@@ -14,6 +14,8 @@ similarly, all the notebooks rely only on relative imports. For the code to work
 * ``monai`` (A deep learning + medical imaging library)
 * ``matplotlib``
 
+#### Running the code
+To run the major experiments once you have added the data, simply run the notebooks in ``notebooks``. 
 
 ##### Evaluation dependencies
 * The [TopCoWSubmissions](https://github.com/fmusio/TopCoWSubmissions) library, which requires
