@@ -9,17 +9,17 @@ if __name__ == "__main__":
     import matplotlib.image as im
     import matplotlib.pyplot as plt
     from data import CONSTANTS
-    from monai.networks.nets import SwinUNETR
+    from monai.networks.nets import UNet
     from data_monai import NeighborFeature, create_data_loader, plot_slices
     
-    epochs = 150
-    start_epoch = 0
+    epochs = 300
+    start_epoch = 50
     size = 128
     channels = 64 # Number of slices per chunk; must be divisible by 32 for SwinUNETR
-    batch_size = 2 # Number of chunks per GPU batch
+    batch_size = 9 # Number of chunks per GPU batch
     num_slices = 1
     neighbor_count = 1
-    save_path = "training/unet_swin_full_2/"
+    save_path = "training/unet_neighbor_big/"
     
     train_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
@@ -63,16 +63,16 @@ if __name__ == "__main__":
         random_shift = True
     )
 
-    net = SwinUNETR(
+    net = UNet(
+        spatial_dims = 3, 
         in_channels = 2 + neighbor_count,
-        out_channels = 1,
-        patch_size = 2,
-        depths = (2, 2, 2, 2),
-        num_heads= (3, 6, 12, 24),
-        drop_rate = 0.5,
-        attn_drop_rate = 0.5,
-        window_size = 7,
-        spatial_dims = 3,
+        out_channels = 1, 
+        strides = (2, 2, 2),          # Downsampling factors
+        channels = (64, 64, 128, 256), # old: (16, 32, 64, 128)  # Res: (128, 64, 32, 16)
+        kernel_size=3, 
+        up_kernel_size=3, 
+        num_res_units=2,
+        dropout=0.1
         ).to("cuda", dtype=torch.float32)
 
     # Load pretrained weights from the Swin Transformer model
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=epochs,
-        eta_min=1e-7,
+        eta_min=1e-6,
     )
 
 
@@ -181,6 +181,7 @@ if __name__ == "__main__":
 
             x_nei = neighbor_loader.get_neighbors(x, ignore_case_id=case_id_batch)
             x_aug = torch.cat((x, x_nei), dim=1)
+            x_aug = torch.flip(x_aug, dims=[2]) if torch.rand(1).item() < 0.5 else x_aug
 
             timesteps = torch.ones(x.shape[0]).to("cuda", dtype=torch.float32)
 
