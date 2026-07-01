@@ -7,7 +7,7 @@ This code has some mandatory dependencies - some that are only used for training
 ```
 python -m scripts.<file name without .py>
 ```
-similarly, all the notebooks rely only on relative imports. For the code to work, you must download the [training data](link.com), unzip it and move the folder nnUNet_raw into root.
+similarly, all the notebooks rely only on relative imports. For the code to work, you must download the [training data](https://drive.proton.me/urls/VG957VYTFG#NQBsQaYrsNDA), unzip it and move the folder nnUNet_raw into root. The predicted test data labels are found [here](https://drive.proton.me/urls/VG957VYTFG#NQBsQaYrsNDA)
 
 ##### Training dependencies
 * ``torch`` (cuda is hard coded, if you have cpu only, Ctr+F replace "cuda" with "cpu" in the entire repo will do the trick).
@@ -178,3 +178,8 @@ Below are segmentation results from running CoW segmentation on the CTA data for
 
 #### Predicted Segmentation, DURAG
 ![img](figures/segmentation_0007_durag.png)
+
+
+## Conclusions
+
+Predicting CTA from NCCT with below 8% relative error is easy, because the raw CTA data is very close to an NCCT scan. The hard part is to predict the structure that is not immediately obvious from the NCCT data. In this task, I have separated out the "non-obvious" data, i.e. the vessels, and I get more than 100% errors when trying to predict these from NCCT data. Furthermore, any attempt at segmentation based on the CTA predictions result in high errors. I would conclude that NCCT to CTA prediction contains more information than just noise, but I was unable to construct anything clinically useful.
