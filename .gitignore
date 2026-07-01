@@ -5,8 +5,8 @@ __pycache__/
 data_raw/
 nnUNet_raw/
 .monai_cache/
+checkpoints/*
 *.pt
-*.png
 *.nii.gz
 container_topcow_nic
 TopCoWSubmissions
