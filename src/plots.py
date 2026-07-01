@@ -32,6 +32,7 @@ def plot_cta_and_segmentation(
     thickness = None,
     device: str = "cpu",
     figsize: tuple[int, int] = (12, 12),
+    **kwargs
 ) -> Any:
     """Plot CTA-only, segmentation-only, and overlay views for one case.
 
@@ -91,7 +92,7 @@ def plot_cta_and_segmentation(
     #img.plot_slices_nii(slices, thickness, axes=axes[0], cmap="gray")
 
     # Row 2: overlay
-    img.plot_slices_nii(slices, thickness, axes=axes, cmap="gray")
+    img.plot_slices_nii(slices, thickness, axes=axes, **kwargs)
     data = pred.data.clone()
     data = torch.where(data==0, torch.nan, data)
     pred_overlay = NiiPoint(data, pred.affine, pred.header, pred.data.device)
