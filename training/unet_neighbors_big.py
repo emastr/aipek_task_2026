@@ -9,17 +9,17 @@ if __name__ == "__main__":
     import matplotlib.image as im
     import matplotlib.pyplot as plt
     from data import CONSTANTS
-    from monai.networks.nets import SwinUNETR
-    from data_monai import NeighborFeature, create_data_loader, plot_slices
+    from monai.networks.nets import UNet
+    from data_monai import create_data_loader, plot_slices, NeighborLoader
     
-    epochs = 150
+    epochs = 301
     start_epoch = 0
     size = 128
     channels = 64 # Number of slices per chunk; must be divisible by 32 for SwinUNETR
-    batch_size = 2 # Number of chunks per GPU batch
+    batch_size = 9 # Number of chunks per GPU batch
     num_slices = 1
-    neighbor_count = 1
-    save_path = "training/unet_swin_full_2/"
+    neighbor_count = 3
+    save_path = "training/unet_neighbor_big/"
     
     train_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         random_shift = True,
     )
     
-    neighbor_loader = NeighborFeature(
+    neighbor_loader = NeighborLoader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
         label_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_OUT}",
         channels = channels, # Number of slices per chunk
@@ -63,16 +63,16 @@ if __name__ == "__main__":
         random_shift = True
     )
 
-    net = SwinUNETR(
+    net = UNet(
+        spatial_dims = 3, 
         in_channels = 2 + neighbor_count,
-        out_channels = 1,
-        patch_size = 2,
-        depths = (2, 2, 2, 2),
-        num_heads= (3, 6, 12, 24),
-        drop_rate = 0.5,
-        attn_drop_rate = 0.5,
-        window_size = 7,
-        spatial_dims = 3,
+        out_channels = 1, 
+        strides = (2, 2, 2),          # Downsampling factors
+        channels = (64, 64, 128, 256), # old: (16, 32, 64, 128)  # Res: (128, 64, 32, 16)
+        kernel_size=3, 
+        up_kernel_size=3, 
+        num_res_units=2,
+        dropout=0.1
         ).to("cuda", dtype=torch.float32)
 
     # Load pretrained weights from the Swin Transformer model
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=epochs,
-        eta_min=1e-7,
+        eta_min=1e-6,
     )
 
 
@@ -150,15 +150,18 @@ if __name__ == "__main__":
             plot_slices(x_val[0, 0].cpu(), pixdim, slices, thicknes, **kwargs)
             plt.gca().set_title(title)
             plt.gcf().savefig(f"{path}inp{i}.png")
-            plot_slices(x_nei[0, 0].cpu(), pixdim, slices, thicknes, **kwargs)
-            plt.gca().set_title(title)
-            plt.gcf().savefig(f"{path}nei{i}.png")
+            for j in range(neighbor_count):
+                plot_slices(x_nei[0, j].cpu(), pixdim, slices, thicknes, **kwargs)
+                plt.gca().set_title(title)
+                plt.gcf().savefig(f"{path}nei{j}{i}.png")
             plt.close('all')
             
-        plt.figure(figsize=(20, 10))
+        
+        col_count = 3 + neighbor_count
+        plt.figure(figsize=(10 * col_count, 10 * 3))
         for i in range(3):
-            for j, target in enumerate(["pred", "out", "inp", "nei"]):
-                plt.subplot(3, 4, i*4 + j + 1)
+            for j, target in enumerate(["pred", "out", "inp"] + [f"nei{k}" for k in range(neighbor_count)]):
+                plt.subplot(3, col_count, i*col_count + j + 1)
                 plt.imshow(im.imread(f"{path}{target}{i}.png"))
                 plt.axis('off')
         plt.tight_layout()

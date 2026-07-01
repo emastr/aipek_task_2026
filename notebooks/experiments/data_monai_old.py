@@ -1,5 +1,4 @@
 import torch
-import hashlib
 from typing import List, Optional, Sequence, Tuple
 from monai.data import DataLoader, PersistentDataset, list_data_collate
 from monai.transforms import (
@@ -13,6 +12,9 @@ from monai.transforms import (
     MapTransform,
     RandSpatialCropSamplesd,
     Resized,
+    SpatialCropd,
+    RandFlipd,
+    RandAffined
 )
 import os
 import shutil
@@ -81,7 +83,7 @@ class VerticalPositionEmbedding(MapTransform):
         d["input"] = torch.cat((img, vertical_positions), dim=0)
         return d
     
-class DeterministicSliceDataset(torch.utils.data.Dataset):
+class RandomSliceDataset(torch.utils.data.Dataset):
     def __init__(self, 
                  base_dataset, 
                  channels, 
@@ -89,42 +91,59 @@ class DeterministicSliceDataset(torch.utils.data.Dataset):
                  num_slices=1,
                 random_flip=False,
                 random_shift=False):
+        self.random_flip = random_flip
+        self.random_shift = random_shift
         self.base_dataset = base_dataset
         self.channels = channels
-        self.size = size
-        self.num_slices = num_slices
-        self.vertical_position_embedding = VerticalPositionEmbedding(keys=["input"])
-
-    @staticmethod
-    def _center_crop_or_pad_depth(volume, target_depth):
-        depth = volume.shape[1]
-        if depth == target_depth:
-            return volume.contiguous()
-
-        if depth > target_depth:
-            start = (depth - target_depth) // 2
-            return volume[:, start:start + target_depth].contiguous()
-
-        pad_before = (target_depth - depth) // 2
-        pad_after = target_depth - depth - pad_before
-        return torch.nn.functional.pad(volume, (0, 0, 0, 0, pad_before, pad_after), value=-1.).contiguous()
+        self.patch_transform = Compose([
+            VerticalPositionEmbedding(keys=["input"]),  # Add vertical position embedding to the input data
+            RandSpatialCropSamplesd(
+                keys=["input", "output"],
+                roi_size=(channels, size, size), 
+                num_samples=num_slices,         
+                random_size=False,
+            ),
+            RandFlipd(
+                keys=["input", "output"],
+                prob=0.5 if self.random_flip else 0.0,
+                spatial_axis=1
+            ),
+            RandAffined(
+                keys=["input", "output"],
+                prob=0.5 if self.random_shift else 0.0,
+                translate_range=(0, 10, 10),
+                padding_mode="border"
+            )
+            
+    ])
 
     def __len__(self):
         return len(self.base_dataset)
 
     def __getitem__(self, idx):
         volume = self.base_dataset[idx]
-        sample = dict(volume)
-        sample["input"] = self._center_crop_or_pad_depth(sample["input"], self.channels)
-        sample["output"] = self._center_crop_or_pad_depth(sample["output"], self.channels)
-        sample = self.vertical_position_embedding(sample)
+        samples = self.patch_transform(volume)
+        if not isinstance(samples, list):
+            samples = [samples]
 
-        if "case_id" not in sample and "case_id" in volume:
-            sample["case_id"] = volume["case_id"]
-        sample["case_idx"] = torch.tensor(idx, dtype=torch.long)
+        fixed_samples = []
+        for sample in samples:
+            sample = dict(sample)
+            if "case_id" not in sample and "case_id" in volume:
+                sample["case_id"] = volume["case_id"]
+            sample["case_idx"] = torch.tensor(idx, dtype=torch.long)
+            depth = sample["input"].shape[1]
+            if depth < self.channels:
+                pad = self.channels - depth
+                sample["input"] = torch.nn.functional.pad(
+                    sample["input"], (0, 0, 0, 0, 0, pad), value=-1.
+                ).contiguous()
+                sample["output"] = torch.nn.functional.pad(
+                    sample["output"], (0, 0, 0, 0, 0, pad), value=-1.
+                ).contiguous()
+            fixed_samples.append(sample)
 
-        return [sample]
-
+        return fixed_samples
 
 class NeighborLoader:
 
@@ -139,7 +158,6 @@ class NeighborLoader:
         size: int = 128,
         coarse_size: int = 32,
         include_neighbor_inputs: bool = False,
-        cache_dir: str = ".neighbor_cache",
     ):
         self.image_dir = image_dir
         self.label_dir = label_dir
@@ -150,7 +168,6 @@ class NeighborLoader:
         self.size = size
         self.coarse_size = coarse_size
         self.include_neighbor_inputs = include_neighbor_inputs
-        self.cache_dir = cache_dir
 
         self._volume_transform = _build_volume_transforms(size=self.size)
         self._full_inputs: List[torch.Tensor] = []
@@ -158,66 +175,7 @@ class NeighborLoader:
         self._full_outputs: List[torch.Tensor] = []
         self._case_ids: List[str] = []
         self._case_id_to_index = {}
-        self._neighbor_cache = {}
-        self._neighbor_cache_path = None
         self._build_index()
-        self._load_or_build_neighbor_cache()
-
-    @staticmethod
-    def _center_crop_or_pad_depth(volume: torch.Tensor, target_depth: int) -> torch.Tensor:
-        depth = volume.shape[1]
-        if depth == target_depth:
-            return volume.contiguous()
-
-        if depth > target_depth:
-            start = (depth - target_depth) // 2
-            return volume[:, start:start + target_depth].contiguous()
-
-        pad_before = (target_depth - depth) // 2
-        pad_after = target_depth - depth - pad_before
-        return torch.nn.functional.pad(volume, (0, 0, 0, 0, pad_before, pad_after), value=-1.0).contiguous()
-
-    def _cache_signature(self) -> str:
-        payload = {
-            "image_dir": os.path.abspath(self.image_dir),
-            "label_dir": os.path.abspath(self.label_dir),
-            "channels": self.channels,
-            "neighbors": self.neighbors,
-            "size": self.size,
-            "coarse_size": self.coarse_size,
-            "include_neighbor_inputs": self.include_neighbor_inputs,
-            "case_ids": self._case_ids,
-        }
-        encoded = repr(payload).encode("utf-8")
-        return hashlib.sha1(encoded).hexdigest()[:16]
-
-    def _load_or_build_neighbor_cache(self):
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self._neighbor_cache_path = os.path.join(
-            self.cache_dir,
-            f"neighbor_cache_{self._cache_signature()}.pt",
-        )
-
-        if os.path.isfile(self._neighbor_cache_path):
-            cache = torch.load(self._neighbor_cache_path, map_location="cpu")
-            if cache.get("case_ids") == self._case_ids:
-                self._neighbor_cache = cache.get("neighbors", {})
-                print(f"Loaded neighbor cache: {self._neighbor_cache_path}")
-                return
-
-        print(f"Building neighbor cache: {self._neighbor_cache_path}")
-        neighbor_cache = {}
-        for case_id, case_idx in self._case_id_to_index.items():
-            best = self._best_candidates(
-                query_coarse=self._coarse_inputs[case_idx],
-                k=self.neighbors,
-                ignore_case_idx=case_idx,
-            )
-            neighbor_cache[case_id] = [self._case_ids[neighbor_case_idx] for _, neighbor_case_idx, _ in best]
-
-        self._neighbor_cache = neighbor_cache
-        torch.save({"case_ids": self._case_ids, "neighbors": self._neighbor_cache}, self._neighbor_cache_path)
-        print(f"Saved neighbor cache: {self._neighbor_cache_path}")
 
     def _build_index(self):
         case_ids = sorted([file[:9] for file in os.listdir(self.image_dir) if file.endswith(".nii.gz")])
@@ -229,8 +187,6 @@ class NeighborLoader:
             volume = self._volume_transform(entry)
             inp = volume["input"].detach().to(dtype=torch.float32, device="cpu")
             out = volume["output"].detach().to(dtype=torch.float32, device="cpu")
-            inp = self._center_crop_or_pad_depth(inp, self.channels)
-            out = self._center_crop_or_pad_depth(out, self.channels)
 
             coarse_inp = torch.nn.functional.interpolate(
                 inp.unsqueeze(0),
@@ -262,6 +218,18 @@ class NeighborLoader:
             raise ValueError("ignore_case_id sequence length does not match batch size")
         return [str(ignore_case_id)] * batch_size
 
+    @staticmethod
+    def _extract_depth_window(volume: torch.Tensor, start: int, depth: int) -> torch.Tensor:
+        # volume shape: [1, D, H, W]
+        d_total = volume.shape[1]
+        if d_total >= depth:
+            start = max(0, min(start, d_total - depth))
+            return volume[:, start:start + depth]
+
+        pad_after = depth - d_total
+        padded = torch.nn.functional.pad(volume, (0, 0, 0, 0, 0, pad_after), value=-1.0)
+        return padded[:, :depth]
+
     def _best_candidates(
         self,
         query_coarse: torch.Tensor,
@@ -276,8 +244,25 @@ class NeighborLoader:
             if ignore_case_idx is not None and case_idx == ignore_case_idx:
                 continue
 
-            dist = torch.mean((coarse_volume - query_coarse) ** 2).item()
-            best_per_case.append((dist, case_idx, 0))
+            d_total = int(coarse_volume.shape[1])
+            if d_total <= 0:
+                continue
+
+            if d_total >= q_depth:
+                starts = range(0, d_total - q_depth + 1)
+            else:
+                starts = [0]
+
+            best_candidate: Optional[Tuple[float, int, int]] = None
+            for start in starts:
+                cand = self._extract_depth_window(coarse_volume, start, q_depth)
+                dist = torch.mean((cand - query_coarse) ** 2).item()
+                candidate = (dist, case_idx, start)
+                if best_candidate is None or dist < best_candidate[0]:
+                    best_candidate = candidate
+
+            if best_candidate is not None:
+                best_per_case.append(best_candidate)
 
         best_per_case.sort(key=lambda x: x[0])
         return best_per_case[:k]
@@ -300,7 +285,7 @@ class NeighborLoader:
         if x.ndim != 5:
             raise ValueError("Expected input shape [B, C, D, H, W] or [B, D, H, W]")
 
-        batch_size, _, _, q_h, q_w = x.shape
+        batch_size, _, q_depth, q_h, q_w = x.shape
         k = self.neighbors if k is None else int(k)
         if k <= 0:
             raise ValueError("k must be > 0")
@@ -308,11 +293,6 @@ class NeighborLoader:
         ignore_case_ids = self._normalize_ignore_case_id(ignore_case_id, batch_size)
 
         query_for_match = x[:, :1].detach().to(device="cpu", dtype=torch.float32)
-        query_for_match = torch.stack([
-            self._center_crop_or_pad_depth(sample, self.channels)
-            for sample in query_for_match
-        ], dim=0)
-        q_depth = int(query_for_match.shape[2])
         query_coarse = torch.nn.functional.interpolate(
             query_for_match,
             size=(q_depth, self.coarse_size, self.coarse_size),
@@ -326,43 +306,32 @@ class NeighborLoader:
             if ignore_case_ids[b] is not None:
                 ignore_case_idx = self._case_id_to_index.get(ignore_case_ids[b], None)
 
-            case_id = ignore_case_ids[b]
-            cached_case_ids = self._neighbor_cache.get(case_id, None) if case_id is not None else None
-            if cached_case_ids is not None:
-                best = [
-                    (0.0, self._case_id_to_index[neighbor_case_id], 0)
-                    for neighbor_case_id in cached_case_ids
-                    if neighbor_case_id in self._case_id_to_index and neighbor_case_id != case_id
-                ]
-                if len(best) < k:
-                    search_best = self._best_candidates(
-                        query_coarse=query_coarse[b],
-                        k=k,
-                        ignore_case_idx=ignore_case_idx,
-                    )
-                    seen_case_ids = {self._case_ids[case_idx] for _, case_idx, _ in best}
-                    for dist, case_idx, start in search_best:
-                        neighbor_case_id = self._case_ids[case_idx]
-                        if neighbor_case_id in seen_case_ids or neighbor_case_id == case_id:
-                            continue
-                        best.append((dist, case_idx, start))
-                        seen_case_ids.add(neighbor_case_id)
-                        if len(best) == k:
-                            break
-                best = best[:k]
-            else:
-                best = self._best_candidates(
-                    query_coarse=query_coarse[b],
-                    k=k,
-                    ignore_case_idx=ignore_case_idx,
-                )
+            best = self._best_candidates(
+                query_coarse=query_coarse[b],
+                k=k,
+                ignore_case_idx=ignore_case_idx,
+            )
 
             out_neighbors: List[torch.Tensor] = []
             for _, case_idx, start in best:
                 in_vol = self._full_inputs[case_idx]
                 out_vol = self._full_outputs[case_idx]
-                in_patch = in_vol.unsqueeze(0)
-                out_patch = out_vol.unsqueeze(0)
+                in_patch = self._extract_depth_window(in_vol, start, q_depth).unsqueeze(0)
+                out_patch = self._extract_depth_window(out_vol, start, q_depth).unsqueeze(0)
+                if in_patch.shape[-2:] != (q_h, q_w):
+                    in_patch = torch.nn.functional.interpolate(
+                        in_patch,
+                        size=(q_depth, q_h, q_w),
+                        mode="trilinear",
+                        align_corners=False,
+                    )
+                if out_patch.shape[-2:] != (q_h, q_w):
+                    out_patch = torch.nn.functional.interpolate(
+                        out_patch,
+                        size=(q_depth, q_h, q_w),
+                        mode="trilinear",
+                        align_corners=False,
+                    )
 
                 if self.include_neighbor_inputs:
                     neighbor_patch = torch.cat((in_patch.squeeze(0), out_patch.squeeze(0)), dim=0)
@@ -428,7 +397,7 @@ def create_data_loader(
     )
 
     # Online slicing part
-    sliced_ds = DeterministicSliceDataset(
+    sliced_ds = RandomSliceDataset(
         base_dataset=persistent_ds,
         channels=channels,
         size = size,

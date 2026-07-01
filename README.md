@@ -1,3 +1,12 @@
+# Code install
+
+This code has some mandatory dependencies - some that are only used for training and some that are used during evaluation.
+
+### Training dependencies
+* ``torch``
+* ``monai`` (A deep learning + medical imaging library)
+* ``matplotlib``
+
 # Main task
 
 Predict CTA (CT angiography) from NCCT (Non contrast CT). 

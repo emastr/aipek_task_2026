@@ -1,9 +1,6 @@
 import torch
 from torch import nn
 import os
-import sys
-
-sys.path.append("../")
 from data import NiiPoint
 import torch.nn.functional as F
 

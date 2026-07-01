@@ -9,17 +9,19 @@ if __name__ == "__main__":
     import matplotlib.image as im
     import matplotlib.pyplot as plt
     from data import CONSTANTS
-    from monai.networks.nets import SwinUNETR
-    from data_monai import NeighborFeature, create_data_loader, plot_slices
+    from monai.networks.nets import UNet
+    from data_monai import create_data_loader, plot_slices, NeighborLoader
+    import time
     
-    epochs = 150
-    start_epoch = 0
+    
+    epochs = 301
+    start_epoch = 300
     size = 128
     channels = 64 # Number of slices per chunk; must be divisible by 32 for SwinUNETR
-    batch_size = 2 # Number of chunks per GPU batch
+    batch_size = 16 # Number of chunks per GPU batch
     num_slices = 1
-    neighbor_count = 1
-    save_path = "training/unet_swin_full_2/"
+    neighbor_count = 3
+    save_path = "training/unet_neighbor_big_double/"
     
     train_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
@@ -33,7 +35,7 @@ if __name__ == "__main__":
         random_shift = True,
     )
     
-    neighbor_loader = NeighborFeature(
+    neighbor_loader = NeighborLoader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
         label_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_OUT}",
         channels = channels, # Number of slices per chunk
@@ -41,7 +43,8 @@ if __name__ == "__main__":
         num_slices = num_slices, # Number of slices per chunk
         device = "cuda",
         size = size,
-        coarse_size = 32
+        coarse_size = 32,
+        include_neighbor_inputs = True,
     )
     
     valid_loader = create_data_loader(
@@ -53,6 +56,7 @@ if __name__ == "__main__":
         random_flip = False,
         random_shift = False
     )
+    
     trainval_loader = create_data_loader(
         image_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_INP}",
         label_dir = f"{CONSTANTS.NORM_DATA_PATH_TRAIN_OUT}",
@@ -63,16 +67,16 @@ if __name__ == "__main__":
         random_shift = True
     )
 
-    net = SwinUNETR(
-        in_channels = 2 + neighbor_count,
-        out_channels = 1,
-        patch_size = 2,
-        depths = (2, 2, 2, 2),
-        num_heads= (3, 6, 12, 24),
-        drop_rate = 0.5,
-        attn_drop_rate = 0.5,
-        window_size = 7,
-        spatial_dims = 3,
+    net = UNet(
+        spatial_dims = 3, 
+        in_channels = 2 + 2 * neighbor_count,
+        out_channels = 1, 
+        strides = (2, 2, 2),          # Downsampling factors
+        channels = (64, 64, 128, 256), # old: (16, 32, 64, 128)  # Res: (128, 64, 32, 16)
+        kernel_size=3, 
+        up_kernel_size=3, 
+        num_res_units=2,
+        dropout=0.1
         ).to("cuda", dtype=torch.float32)
 
     # Load pretrained weights from the Swin Transformer model
@@ -92,7 +96,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=epochs,
-        eta_min=1e-7,
+        eta_min=1e-6,
     )
 
 
@@ -150,15 +154,24 @@ if __name__ == "__main__":
             plot_slices(x_val[0, 0].cpu(), pixdim, slices, thicknes, **kwargs)
             plt.gca().set_title(title)
             plt.gcf().savefig(f"{path}inp{i}.png")
-            plot_slices(x_nei[0, 0].cpu(), pixdim, slices, thicknes, **kwargs)
-            plt.gca().set_title(title)
-            plt.gcf().savefig(f"{path}nei{i}.png")
+            for j in range(neighbor_count):
+                plot_slices(x_nei[0, 2 * j].cpu(), pixdim, slices, thicknes, **kwargs)
+                plt.gca().set_title(title)
+                plt.gcf().savefig(f"{path}nei{j}_inp{i}.png")
+                plot_slices(x_nei[0, 2 * j + 1].cpu(), pixdim, slices, thicknes, **kwargs)
+                plt.gca().set_title(title)
+                plt.gcf().savefig(f"{path}nei{j}_out{i}.png")
             plt.close('all')
             
-        plt.figure(figsize=(20, 10))
+        
+        col_count = 3 + 2 * neighbor_count
+        plt.figure(figsize=(10 * col_count, 10 * 3))
         for i in range(3):
-            for j, target in enumerate(["pred", "out", "inp", "nei"]):
-                plt.subplot(3, 4, i*4 + j + 1)
+            neighbor_targets = []
+            for k in range(neighbor_count):
+                neighbor_targets.extend([f"nei{k}_inp", f"nei{k}_out"])
+            for j, target in enumerate(["pred", "out", "inp"] + neighbor_targets):
+                plt.subplot(3, col_count, i*col_count + j + 1)
                 plt.imshow(im.imread(f"{path}{target}{i}.png"))
                 plt.axis('off')
         plt.tight_layout()
@@ -178,38 +191,47 @@ if __name__ == "__main__":
             y = batch["output"].to("cuda", dtype=torch.float32, non_blocking=True)
             pixdim = batch["pixdim"].squeeze()
             case_id_batch = batch.get("case_id", None)
-
+            
+            # Get neighbor features
+            t = time.time()
             x_nei = neighbor_loader.get_neighbors(x, ignore_case_id=case_id_batch)
             x_aug = torch.cat((x, x_nei), dim=1)
+            t_data = time.time() - t
 
-            timesteps = torch.ones(x.shape[0]).to("cuda", dtype=torch.float32)
-
+            # Evaluate model and loss
+            t = time.time()
             ynet = net(x_aug)
             loss = loss_fn(ynet, y)
+            t_infer = time.time() - t
+            
+            # Backpropagation and optimization
+            t = time.time()
             loss.backward()
             optimizer.step()
             scheduler.step()
+            t_train = time.time() - t
             
-            if epoch % 5 == 0 and b == 0:
-                
-                with torch.no_grad():
-                    val_loss = validation_plots(net, valid_loader, f"{save_path}valid", epoch)
-                    train_loss = validation_plots(net, trainval_loader, f"{save_path}train", epoch)
-                    losses.append((epoch, val_loss, train_loss))
-                    
-                    plt.plot([e for e, _, _ in losses], [v for _, v, _ in losses], label="Validation Loss")
-                    plt.plot([e for e, _, _ in losses], [t for _, _, t in losses], label="Train Loss")
-                    plt.legend()
-                    plt.savefig(f"{save_path}losses.png")
-                    plt.close()
-                    
+            if b == 0:
+                if epoch % 5 == 0:
+                    # Save validation and training plots every 5 epochs
+                    with torch.no_grad():
+                        val_loss = validation_plots(net, valid_loader, f"{save_path}valid", epoch)
+                        train_loss = validation_plots(net, trainval_loader, f"{save_path}train", epoch)
+                        losses.append((epoch, val_loss, train_loss))
+                        
+                        plt.plot([e for e, _, _ in losses], [v for _, v, _ in losses], label="Validation Loss")
+                        plt.plot([e for e, _, _ in losses], [t for _, _, t in losses], label="Train Loss")
+                        plt.legend()
+                        plt.savefig(f"{save_path}losses.png")
+                        plt.close()
                     
                 if epoch % 50 == 0:
+                    # Save model checkpoint
                     torch.save(net.state_dict(), f"{save_path}epoch_{epoch}.pt")
                 
             
             current_lr = optimizer.param_groups[0]["lr"]
-            print(f"Epoch: {epoch}, Loss: {loss.item():.4f}, LR: {current_lr:.6e}")
+            print(f"Epoch: {epoch}, Loss: {loss.item():.4f}, LR: {current_lr:.3e}, Data Time: {t_data:.2f}s, Inference Time: {t_infer:.2f}s, Train Time: {t_train:.2f}s")
 
         scheduler.step()
             
