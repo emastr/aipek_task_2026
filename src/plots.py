@@ -109,7 +109,7 @@ def plot_cta_and_segmentation(
 
 
 def plot_slices(data_torch, pixdims, slices, thicknesses=None, axes=None, **kwargs):
-    data_np = data_torch.cpu().numpy()
+    data_np = data_torch.detach().cpu().numpy()
     idx = [int(slices[i] * data_np.shape[i]) for i in range(3)]
 
     # Axes: (X, Y, Z) = (width, height, depth)

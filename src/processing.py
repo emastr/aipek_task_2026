@@ -2,6 +2,7 @@ import torch
 
 from src.data import NiiPoint
 
+DATA_ROOT = "nnUNet_raw"
 
 class CONSTANTS:
     BACK = 0    # Background
@@ -9,17 +10,17 @@ class CONSTANTS:
     VESSEL_MAX = 400  # HU vessel max value for normalization
     NCCT_MIN = -30  # HU NCCT min value for normalization
     NCCT_MAX = 90   # HU NCCT max value for normalization
-    DATA_PATH = "data/Dataset/"
-    NORM_DATA_PATH = "data/Dataset_val/"
-    NORM_DATA_PATH_VAL_INP = "data/Dataset_val/imagesVl/"
-    NORM_DATA_PATH_VAL_OUT = "data/Dataset_val/labelsVl/"
-    NORM_DATA_PATH_TRAIN_INP = "data/Dataset_val/imagesTr/"
-    NORM_DATA_PATH_TRAIN_OUT = "data/Dataset_val/labelsTr/"
-    NORM_DATA_PATH_TEST_INP = "data/Dataset_val/imagesTs/"
-    NORM_DATA_PATH_TEST_OUT = "data/Dataset_val/labelsTs/"
-    NORM_PRED_PATH = "data/Predictions_val/"
-    TEST_PRED_PATH = "data/Predictions_test/"
-    PRED_PATH = "data/Predictions_val_small/"
+    DATA_PATH = f"{DATA_ROOT}/Dataset/"
+    NORM_DATA_PATH = f"{DATA_ROOT}/Dataset_val/"
+    NORM_DATA_PATH_VAL_INP = f"{DATA_ROOT}/Dataset_val/imagesVl/"
+    NORM_DATA_PATH_VAL_OUT = f"{DATA_ROOT}/Dataset_val/labelsVl/"
+    NORM_DATA_PATH_TRAIN_INP = f"{DATA_ROOT}/Dataset_val/imagesTr/"
+    NORM_DATA_PATH_TRAIN_OUT = f"{DATA_ROOT}/Dataset_val/labelsTr/"
+    NORM_DATA_PATH_TEST_INP = f"{DATA_ROOT}/Dataset_val/imagesTs/"
+    NORM_DATA_PATH_TEST_OUT = f"{DATA_ROOT}/Dataset_val/labelsTs/"
+    NORM_PRED_PATH = f"{DATA_ROOT}/Predictions_val/"
+    TEST_PRED_PATH = f"{DATA_ROOT}/Predictions_test/"
+    PRED_PATH = f"{DATA_ROOT}/Predictions_val_small/"
     
 
 class DataTfmLibrary: 
