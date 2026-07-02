@@ -13,7 +13,7 @@ from src.data import create_data_loader
 
 if __name__ == "__main__": # Avoids multiprocessing issues 
     epochs = 1000
-    start_epoch = 950
+    start_epoch = 2000
     size = 128
     channels = 64 # Number of slices per chunk; must be divisible by 32 for SwinUNETR
     batch_size = 16 # Number of chunks per GPU batch
@@ -68,7 +68,7 @@ if __name__ == "__main__": # Avoids multiprocessing issues
     if start_epoch > 0:
         net.load_state_dict(torch.load(f"{save_path}epoch_{start_epoch}.pt"), strict=False)
 
-    optimizer = torch.optim.Adam(params=net.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(params=net.parameters(), lr=1e-3)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=epochs,
