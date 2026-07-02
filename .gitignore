@@ -11,3 +11,4 @@ checkpoints/*
 container_topcow_nic
 TopCoWSubmissions
 preds
+*.png
