@@ -145,25 +145,25 @@ The baselines obtain 7% NL1 error on the CTA validation data, but 100% NL1 and o
 |---|---|---|---|
 | conv 1-NN | $104.7\% \pm 4.8\%$ | $8.2\% \pm 2.5\%$ | $8.7\% \pm 1.1\%$ |
 | 3-NN | $113.8\% \pm 6.0\%$ | $8.2\% \pm 2.5\%$ | $1.9\% \pm 0.1\%$ |
-| DURAG | $172.8\% \pm 16.9\%$ | $8.6\% \pm 2.5\%$ | $11.3\% \pm 1.6\%$ |
+| DURAG | $193.8\% \pm 23.5\%$ | $8.6\% \pm 2.6\%$ | $13.8\% \pm 1.4\%$ |
 
 As seen in the table, DURAG has almost double the error on the vessel maps compared to baseline, despite being explicitely trained to predict them. The IoU is higher, which means that it is better att predicting the approximate regions where vessels will be. The CTA error is comparable for all models.
 
 ## Qualitative Results
 
-First I compare the predicted vessel structure from the different models on a valudation case 0007. 
+First I compare the predicted vessel structure from the different models on a valudation case 0010. 
 
 #### Vessel structure for CTA (ground truth)
-![img](figures/vessel_0012_cta.png)
+![img](figures/vessel_0010_cta.png)
 
 #### Predicted vessel structure, 3-NN
-![img](figures/vessel_0012_knn.png)
+![img](figures/vessel_0010_knn.png)
 
 #### Predicted vessel structure, convolutional 1-NN
-![img](figures/vessel_0012_cknn.png)
+![img](figures/vessel_0010_cknn.png)
 
 #### Predicted vessel structure, DURAG
-![img](figures/vessel_0012_durag.png)
+![img](figures/vessel_0010_durag.png)
 
 
 Below are segmentation results from running CoW segmentation on the CTA data for case 0007 (in my validation set, not trained on), using the different models. Reproducing these results requires installing the TopCoWSubmissions library, as specified before. The knn algorithm results in vessels at the correct spot but wrong shape, and convolutional 1-NN hallucinates new vessels all over.

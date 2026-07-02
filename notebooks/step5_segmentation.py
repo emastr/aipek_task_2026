@@ -8,7 +8,7 @@ if __name__ == "__main__":
     for case, filterc in zip(
         cases, 
         # Filter out the ones that we already ran
-        [False, True, True, True, True]): 
+        [False, False, False, False, True]): 
         data_path = f"{CONSTANTS.NORM_PRED_PATH}images_{case}/"
         output_path = f"{CONSTANTS.NORM_PRED_PATH}segment_new_{case}/"
         os.makedirs(output_path, exist_ok=True)
